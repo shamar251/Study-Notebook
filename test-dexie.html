@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dexie.js Test</title>
+  <script src="https://unpkg.com/dexie@latest/dist/dexie.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    #results {
+      background-color: #f5f5f5;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 15px;
+      margin-top: 20px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      height: 500px;
+      overflow-y: auto;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .success {
+      color: #4CAF50;
+      font-weight: bold;
+    }
+
+    .error {
+      color: #f44336;
+      font-weight: bold;
+    }
+
+    .info {
+      color: #2196F3;
+    }
+
+    button {
+      background-color: #4CAF50;
+      border: none;
+      color: white;
+      padding: 10px 20px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+      margin: 4px 2px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    h1 {
+      color: #333;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Dexie.js IndexedDB Test</h1>
+  <p>This page tests basic Dexie.js functionality with IndexedDB.</p>
+
+  <button id="runTest">Run Test</button>
+  <button id="clearResults">Clear Results</button>
+
+  <div id="results"></div>
+
+  <script>
+    // Get DOM elements
+    const resultsDiv = document.getElementById('results');
+    const runTestButton = document.getElementById('runTest');
+    const clearResultsButton = document.getElementById('clearResults');
+
+    // Log function to display results
+    function log(message, type = 'normal') {
+      const timestamp = new Date().toLocaleTimeString();
+      const cssClass = type === 'success' ? 'success' :
+        type === 'error' ? 'error' :
+          type === 'info' ? 'info' : '';
+      resultsDiv.innerHTML += `<div class="${cssClass}">[${timestamp}] ${message}</div>`;
+      resultsDiv.scrollTop = resultsDiv.scrollHeight;
+    }
+
+    // Create a test database
+    const testDb = new Dexie('TestDatabase');
+
+    // Define schema
+    testDb.version(1).stores({
+      items: '++id, name, category'
+    });
+
+    // Function to test basic CRUD operations
+    async function testDexieOperations() {
+      log('Starting Dexie test...');
+
+      try {
+        // Clear any existing data
+        await testDb.items.clear();
+        log('Database cleared', 'info');
+
+        // Add items
+        const id1 = await testDb.items.add({ name: 'Item 1', category: 'Test' });
+        const id2 = await testDb.items.add({ name: 'Item 2', category: 'Test' });
+        log(`Added items with IDs: ${id1}, ${id2}`, 'info');
+
+        // Get all items
+        const allItems = await testDb.items.toArray();
+        log('All items: ' + JSON.stringify(allItems, null, 2));
+
+        // Get item by ID
+        const item = await testDb.items.get(id1);
+        log('Item by ID: ' + JSON.stringify(item, null, 2));
+
+        // Update item
+        await testDb.items.update(id1, { name: 'Updated Item 1' });
+        const updatedItem = await testDb.items.get(id1);
+        log('Updated item: ' + JSON.stringify(updatedItem, null, 2));
+
+        // Delete item
+        await testDb.items.delete(id2);
+        const remainingItems = await testDb.items.toArray();
+        log('Remaining items after deletion: ' + JSON.stringify(remainingItems, null, 2));
+
+        // Query by index
+        const testItems = await testDb.items.where('category').equals('Test').toArray();
+        log('Items with category "Test": ' + JSON.stringify(testItems, null, 2));
+
+        log('Dexie test completed successfully!', 'success');
+      } catch (error) {
+        log('Error during Dexie test: ' + error, 'error');
+      }
+    }
+
+    // Now let's test our actual database schema from the application
+    async function testStudyNotebookDB() {
+      log('\n--- Testing Study Notebook Database ---', 'info');
+
+      try {
+        // Create a test instance of our actual database
+        const StudyNotebookDB = new Dexie('StudyNotebookDB_Test');
+
+        // Define the same schema as in our application
+        StudyNotebookDB.version(1).stores({
+          notes: 'id, title, folderId, updatedAt, lastStudied, tags',
+          folders: 'id, name, parentId'
+        });
+
+        // Clear any existing test data
+        await StudyNotebookDB.notes.clear();
+        await StudyNotebookDB.folders.clear();
+        log('Study Notebook test database cleared', 'info');
+
+        // Add test folders
+        const folder1 = { id: "folder-test-1", name: "Test Folder", parentId: null };
+        const folder2 = { id: "folder-test-2", name: "Test Subfolder", parentId: "folder-test-1" };
+
+        await StudyNotebookDB.folders.add(folder1);
+        await StudyNotebookDB.folders.add(folder2);
+        log('Added test folders', 'info');
+
+        // Add test note
+        const testNote = {
+          id: "note-test-1",
+          title: "Test Note",
+          blocks: [
+            { id: "block-test-1", type: "who", content: "Test Term", linkedBlockId: "block-test-2" },
+            { id: "block-test-2", type: "what", content: "Test Definition" }
+          ],
+          tags: ["test"],
+          folderId: "folder-test-1",
+          updatedAt: Date.now(),
+          lastStudied: Date.now(),
+          studyStats: {
+            quizAttempts: 1,
+            quizCorrect: 1,
+            flashcardReviews: 1
+          }
+        };
+
+        await StudyNotebookDB.notes.add(testNote);
+        log('Added test note', 'info');
+
+        // Retrieve the note
+        const retrievedNote = await StudyNotebookDB.notes.get("note-test-1");
+        log('Retrieved test note: ' + JSON.stringify(retrievedNote, null, 2));
+
+        // Test querying by folder
+        const folderNotes = await StudyNotebookDB.notes.where('folderId').equals('folder-test-1').toArray();
+        log('Notes in test folder: ' + JSON.stringify(folderNotes, null, 2));
+
+        // Test updating a note
+        await StudyNotebookDB.notes.update("note-test-1", {
+          title: "Updated Test Note",
+          updatedAt: Date.now()
+        });
+
+        const updatedNote = await StudyNotebookDB.notes.get("note-test-1");
+        log('Updated test note: ' + JSON.stringify(updatedNote, null, 2));
+
+        // Clean up
+        await StudyNotebookDB.delete();
+        log('Study Notebook test database deleted', 'info');
+
+        log('Study Notebook database test completed successfully!', 'success');
+      } catch (error) {
+        log('Error during Study Notebook database test: ' + error, 'error');
+      }
+    }
+
+    // Event listeners
+    runTestButton.addEventListener('click', async () => {
+      resultsDiv.innerHTML = ''; // Clear previous results
+      await testDexieOperations();
+      await testStudyNotebookDB();
+    });
+
+    clearResultsButton.addEventListener('click', () => {
+      resultsDiv.innerHTML = '';
+    });
+  </script>
+</body>
+
+</html>

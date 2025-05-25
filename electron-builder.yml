@@ -1,0 +1,26 @@
+appId: com.yourcompany.quizletnotes
+productName: Quizlet Notes
+copyright: Copyright © 2023 Your Company
+directories:
+  output: dist
+  buildResources: public
+files:
+  - from: out
+    to: out
+  - from: electron
+    to: electron
+  - package.json
+mac:
+  category: public.app-category.education
+  target:
+    - dmg
+    - zip
+win:
+  target:
+    - nsis
+    - portable
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Education
