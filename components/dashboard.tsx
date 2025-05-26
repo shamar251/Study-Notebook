@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { BookOpen, Brain, Clock, Edit, Plus, Calendar, Tag, GraduationCap } from "lucide-react"
+import { useState, useEffect } from "react"
+import { BookOpen, Brain, Clock, Edit, Plus, Calendar, Tag, GraduationCap, Folder as FolderIcon, FileText } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import type { Note, Folder } from "@/components/note-app"
 import TimeSince from "./TimeSince"
+import { db } from "@/lib/db"
 
 interface DashboardProps {
   notes: Note[]
@@ -20,6 +21,22 @@ interface DashboardProps {
 
 export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onCreateNote }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("recent")
+  const [folderTestSessions, setFolderTestSessions] = useState<{ [folderId: string]: any }>({})
+
+  useEffect(() => {
+    async function fetchFolderTestSessions() {
+      const sessions: { [folderId: string]: any } = {}
+      for (const folder of folders) {
+        // Get the most recent test session for this folder
+        const testSessions = await db.testSessions.where("folderId").equals(folder.id).reverse().toArray()
+        if (testSessions.length > 0) {
+          sessions[folder.id] = testSessions[0]
+        }
+      }
+      setFolderTestSessions(sessions)
+    }
+    fetchFolderTestSessions()
+  }, [folders])
 
   // Sort notes by last updated
   const recentNotes = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6)
@@ -32,7 +49,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
 
   // Find notes that need review (have WHO blocks)
   const needsReviewNotes = notes
-    .filter((note) => note.blocks.some((block) => block.type === "who" && block.linkedBlockId))
+    .filter((note) => note.blocks.some((block) => block.type === "who" && block.linkedBlockIds && block.linkedBlockIds.length > 0))
     .slice(0, 6)
 
   // Get folder by ID
@@ -91,7 +108,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
 
   // Count WHO/WHAT pairs
   const countStudyPairs = (note: Note): number => {
-    return note.blocks.filter((block) => block.type === "who" && block.linkedBlockId).length
+    return note.blocks.filter((block) => block.type === "who" && block.linkedBlockIds && block.linkedBlockIds.length > 0).length
   }
 
   return (
@@ -137,20 +154,20 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
               <div className="flex items-center gap-2">
                 <div className="text-3xl font-bold">
                   {(() => {
-                    const notesWithQuizzes = notes.filter((n) => n.studyStats && n.studyStats.quizAttempts && n.studyStats.quizAttempts > 0);
-                    if (notesWithQuizzes.length === 0) return "0%";
+                    const notesWithQuizzes = notes.filter((n) => n.studyStats && n.studyStats.quizAttempts && n.studyStats.quizAttempts > 0)
+                    if (notesWithQuizzes.length === 0) return "0%"
 
-                    const totalProgress = notesWithQuizzes.reduce((total, note) => total + getStudyProgress(note), 0);
-                    return `${Math.round(totalProgress / notesWithQuizzes.length)}%`;
+                    const totalProgress = notesWithQuizzes.reduce((total, note) => total + getStudyProgress(note), 0)
+                    return `${Math.round(totalProgress / notesWithQuizzes.length)}%`
                   })()}
                 </div>
                 <Progress
                   value={(() => {
-                    const notesWithQuizzes = notes.filter((n) => n.studyStats && n.studyStats.quizAttempts && n.studyStats.quizAttempts > 0);
-                    if (notesWithQuizzes.length === 0) return 0;
+                    const notesWithQuizzes = notes.filter((n) => n.studyStats && n.studyStats.quizAttempts && n.studyStats.quizAttempts > 0)
+                    if (notesWithQuizzes.length === 0) return 0
 
-                    const totalProgress = notesWithQuizzes.reduce((total, note) => total + getStudyProgress(note), 0);
-                    return Math.round(totalProgress / notesWithQuizzes.length);
+                    const totalProgress = notesWithQuizzes.reduce((total, note) => total + getStudyProgress(note), 0)
+                    return Math.round(totalProgress / notesWithQuizzes.length)
                   })()}
                   className="h-2 flex-1"
                 />
@@ -163,153 +180,200 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
-            <TabsTrigger value="recent">Recent Notes</TabsTrigger>
-            <TabsTrigger value="folders">Recent Folders</TabsTrigger>
-            <TabsTrigger value="study">Study History</TabsTrigger>
-            <TabsTrigger value="review">Needs Review</TabsTrigger>
+            <TabsTrigger value="recent"><Clock className="w-4 h-4 mr-1" />Recent</TabsTrigger>
+            <TabsTrigger value="study"><GraduationCap className="w-4 h-4 mr-1" />Study History</TabsTrigger>
+            <TabsTrigger value="review"><Tag className="w-4 h-4 mr-1" />Needs Review</TabsTrigger>
           </TabsList>
 
           <TabsContent value="recent" className="mt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {recentNotes.map((note) => (
-                <Card key={note.id} className="overflow-hidden">
-                  <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="text-lg">{note.title}</CardTitle>
-                        <CardDescription>{getFolderName(note.folderId)}</CardDescription>
-                      </div>
-                      <Badge variant="outline" className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> <TimeSince timestamp={note.updatedAt} />
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pb-2">
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {note.tags && note.tags.length > 0 ? (
-                        note.tags.map((tag) => (
-                          <Badge key={tag} variant="secondary" className="text-xs">
-                            {tag}
-                          </Badge>
-                        ))
-                      ) : (
-                        <Badge variant="secondary" className="text-xs">No tags</Badge>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-500 line-clamp-2">
-                      {note.blocks.find((b) => b.type === "note")?.content ||
-                        note.blocks.find((b) => b.type === "what")?.content ||
-                        "No content"}
-                    </p>
-                    <div className="flex items-center gap-2 mt-2">
-                      <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center">
-                        <span className="font-medium mr-1">{countStudyPairs(note)}</span> study items
-                      </div>
-                      {note.studyStats?.quizAttempts ? (
-                        <div className="text-xs text-green-600 dark:text-green-400 flex items-center">
-                          <span className="font-medium mr-1">{getStudyProgress(note)}%</span> quiz score
+            <div className="mb-8">
+              <h2 className="text-xl font-bold mb-4">Recent Notes</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {recentNotes.map((note) => (
+                  <Card key={note.id} className="overflow-hidden">
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-black" />
+                            {note.title}
+                          </CardTitle>
+                          <CardDescription>{getFolderName(note.folderId)}</CardDescription>
                         </div>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                  <CardFooter className="pt-2 flex justify-between">
-                    <Button variant="outline" size="sm" onClick={() => onOpenNote(note)}>
-                      <Edit className="w-3 h-3 mr-1" /> Edit
-                    </Button>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "flashcards")}>
-                        <BookOpen className="w-3 h-3 mr-1" /> Cards
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "quiz")}>
-                        <Brain className="w-3 h-3 mr-1" /> Quiz
-                      </Button>
-                    </div>
-                  </CardFooter>
-                </Card>
-              ))}
-              {recentNotes.length === 0 && (
-                <div className="col-span-3 text-center py-12">
-                  <p className="text-gray-500 mb-4">No notes yet. Create your first note to get started!</p>
-                  <Button onClick={onCreateNote}>
-                    <Plus className="w-4 h-4 mr-2" /> Create Note
-                  </Button>
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="folders" className="mt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {[...folders]
-                .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-                .slice(0, 6)
-                .map((folder) => {
-                  // Fallback for createdAt
-                  const hasValidCreatedAt = typeof folder.createdAt === 'number' && folder.createdAt > 0;
-                  const folderNotes = notes.filter(note => note.folderId === folder.id);
-                  const studyItems = folderNotes.reduce((total, note) => total + countStudyPairs(note), 0);
-                  return (
-                    <Card key={folder.id} className="overflow-hidden">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <CardTitle className="text-lg">{folder.name}</CardTitle>
-                            <CardDescription>
-                              {folderNotes.length} notes
-                            </CardDescription>
-                            {folder.description && (
-                              <div className="text-xs text-gray-500 mt-1 line-clamp-2">{folder.description}</div>
-                            )}
+                        <Badge variant="outline" className="flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> <TimeSince timestamp={note.updatedAt} />
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pb-2">
+                      <div className="flex flex-wrap gap-1 mb-2">
+                        {note.tags && note.tags.length > 0 ? (
+                          note.tags.map((tag) => (
+                            <Badge key={tag} variant="secondary" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">No tags</Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500 line-clamp-2">
+                        {note.blocks.find((b) => b.type === "note")?.content ||
+                          note.blocks.find((b) => b.type === "what")?.content ||
+                          "No content"}
+                      </p>
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center">
+                          <span className="font-medium mr-1">{countStudyPairs(note)}</span> study items
+                        </div>
+                        {note.studyStats?.quizAttempts ? (
+                          <div className="text-xs text-green-600 dark:text-green-400 flex items-center">
+                            <span className="font-medium mr-1">{getStudyProgress(note)}%</span> quiz score
                           </div>
-                          <Badge variant="outline" className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {hasValidCreatedAt ? <TimeSince timestamp={folder.createdAt} /> : <span>Unknown</span>}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pb-2">
-                        <div className="flex items-center gap-2 mb-2">
-                          <a href="#" className="text-xs text-blue-600 dark:text-blue-400 flex items-center hover:underline">
-                            <span className="font-medium mr-1">{studyItems}</span> study items
-                          </a>
-                        </div>
-                      </CardContent>
-                      <CardFooter className="pt-2 flex justify-end gap-2">
-                        {/* <Button variant="ghost" size="sm" onClick={() => {
-                          if (folderNotes.length > 0) {
-                            onStudyNote(folder.id, "flashcards");
-                          }
-                        }} disabled={folderNotes.length === 0}>
+                        ) : null}
+                      </div>
+                    </CardContent>
+                    <CardFooter className="pt-2 flex justify-between">
+                      <Button variant="outline" size="sm" onClick={() => onOpenNote(note)}>
+                        <Edit className="w-3 h-3 mr-1" /> Edit
+                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "flashcards")}>
                           <BookOpen className="w-3 h-3 mr-1" /> Cards
-                        </Button> */}
-                        <Button variant="ghost" size="sm" onClick={() => {
-                          onStudyNote(folder.id, "quiz");
-                        }} disabled={folderNotes.length === 0}>
-                          <GraduationCap className="w-3 h-3 mr-1" /> Study
                         </Button>
-                      </CardFooter>
-                    </Card>
-                  )
-                })}
-              {/* {folders.length <= 1 && (
-                <div className="col-span-3 text-center py-12">
-                  <p className="text-gray-500 mb-4">No folders created yet. Create your first folder to get started!</p>
-                  <Button onClick={onCreateNote}>
-                    <Plus className="w-4 h-4 mr-2" /> Create Note
-                  </Button>
-                </div>
-              )} */}
+                        <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "quiz")}>
+                          <Brain className="w-3 h-3 mr-1" /> Quiz
+                        </Button>
+                      </div>
+                    </CardFooter>
+                  </Card>
+                ))}
+                {recentNotes.length === 0 && (
+                  <div className="col-span-3 text-center py-12">
+                    <p className="text-gray-500 mb-4">No notes yet. Create your first note to get started!</p>
+                    <Button onClick={onCreateNote}>
+                      <Plus className="w-4 h-4 mr-2" /> Create Note
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <h2 className="text-xl font-bold mb-4">Recent Folders</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {[...folders]
+                  .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+                  .slice(0, 6)
+                  .map((folder) => {
+                    // Fallback for createdAt
+                    const hasValidCreatedAt = typeof folder.createdAt === 'number' && folder.createdAt > 0
+                    const folderNotes = notes.filter(note => note.folderId === folder.id)
+                    const studyItems = folderNotes.reduce((total, note) => total + countStudyPairs(note), 0)
+                    return (
+                      <Card key={folder.id} className="overflow-hidden">
+                        <CardHeader className="pb-2">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <CardTitle className="text-lg flex items-center gap-2">
+                                <FolderIcon className="w-4 h-4 text-black" />
+                                {folder.name}
+                              </CardTitle>
+                              <CardDescription>
+                                {folderNotes.length} notes
+                              </CardDescription>
+                              {folder.description && (
+                                <div className="text-xs text-gray-500 mt-1 line-clamp-2">{folder.description}</div>
+                              )}
+                            </div>
+                            <Badge variant="outline" className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {hasValidCreatedAt ? <TimeSince timestamp={folder.createdAt} /> : <span>Unknown</span>}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pb-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            <a href="#" className="text-xs text-blue-600 dark:text-blue-400 flex items-center hover:underline">
+                              <span className="font-medium mr-1">{studyItems}</span> study items
+                            </a>
+                          </div>
+                        </CardContent>
+                        <CardFooter className="pt-2 flex justify-end gap-2">
+                          <Button variant="ghost" size="sm" onClick={() => {
+                            onStudyNote(folder.id, "quiz")
+                          }} disabled={folderNotes.length === 0}>
+                            <GraduationCap className="w-3 h-3 mr-1" /> Study
+                          </Button>
+                        </CardFooter>
+                      </Card>
+                    )
+                  })}
+              </div>
             </div>
           </TabsContent>
 
           <TabsContent value="study" className="mt-0">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {/* Show folder study history first */}
+              {folders.map((folder) => {
+                const session = folderTestSessions[folder.id]
+                if (!session) return null
+                const folderNotes = notes.filter(note => note.folderId === folder.id)
+                return (
+                  <Card key={folder.id} className="overflow-hidden">
+                    <CardHeader className="pb-2">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <FolderIcon className="w-4 h-4 text-black" />
+                            {folder.name}
+                          </CardTitle>
+                          <CardDescription>Folder Study Session</CardDescription>
+                        </div>
+                        <Badge variant="outline" className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3" /> <TimeSince timestamp={session.startTime} />
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pb-2">
+                      <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                          <div className="text-xs text-gray-500 mb-1">Flashcards</div>
+                          <div className="text-lg font-bold">-</div>
+                        </div>
+                        <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
+                          <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
+                          <div className="text-lg font-bold">-</div>
+                        </div>
+                        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
+                          <div className="text-xs text-gray-500 mb-1">Test Score</div>
+                          <div className="text-lg font-bold">{session.score}%</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Progress value={session.score} className="h-2 flex-1" />
+                        <span className="text-xs text-gray-500">Test</span>
+                      </div>
+                    </CardContent>
+                    <CardFooter className="pt-2 flex justify-end gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(folder.id, "quiz")}
+                        disabled={folderNotes.length === 0}>
+                        <GraduationCap className="w-3 h-3 mr-1" /> Study
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                )
+              })}
+              {/* Show note study history as before, but add Test Score */}
               {studyNotes.map((note) => (
                 <Card key={note.id} className="overflow-hidden">
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start">
                       <div>
-                        <CardTitle className="text-lg">{note.title}</CardTitle>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-black" />
+                          {note.title}
+                        </CardTitle>
                         <CardDescription>{getFolderName(note.folderId)}</CardDescription>
                       </div>
                       <Badge variant="outline" className="flex items-center gap-1">
@@ -318,7 +382,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                     </div>
                   </CardHeader>
                   <CardContent className="pb-2">
-                    <div className="grid grid-cols-2 gap-4 mb-3">
+                    <div className="grid grid-cols-3 gap-4 mb-3">
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
                         <div className="text-xs text-gray-500 mb-1">Flashcards</div>
                         <div className="text-lg font-bold">{note.studyStats?.flashcardReviews || 0}</div>
@@ -326,6 +390,10 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                       <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
                         <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
                         <div className="text-lg font-bold">{getStudyProgress(note)}%</div>
+                      </div>
+                      <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
+                        <div className="text-xs text-gray-500 mb-1">Test Score</div>
+                        <div className="text-lg font-bold">{/* If you have note test stats, show here, else dash */}-</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -374,7 +442,10 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start">
                       <div>
-                        <CardTitle className="text-lg">{note.title}</CardTitle>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-black" />
+                          {note.title}
+                        </CardTitle>
                         <CardDescription>{getFolderName(note.folderId)}</CardDescription>
                       </div>
                       <Badge variant="outline" className="flex items-center gap-1">

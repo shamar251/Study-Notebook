@@ -13,7 +13,7 @@ import type { Note } from "@/components/note-app"
 interface StudyModeSelectorProps {
   folderName: string
   folderDescription?: string
-  onSelectMode: (mode: "flashcards" | "quiz") => void
+  onSelectMode: (mode: "flashcards" | "quiz" | "test") => void
   onCreateNote: () => void
   folderNotes: Note[]
   onEditDescription?: (description: string) => void
@@ -37,11 +37,11 @@ export default function StudyModeSelector({
   // Count total study items (WHO/WHAT pairs)
   const totalStudyItems = folderNotes.reduce((total, note) => {
     const studyItems = note.blocks.filter((block) => {
-      const isStudyItem = block.type === "who" && block.linkedBlockId;
+      const isStudyItem = block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0;
       if (isStudyItem) {
         console.log(`Found study item in ${note.title}:`, {
           who: block.content,
-          what: note.blocks.find(b => b.id === block.linkedBlockId)?.content
+          what: note.blocks.find(b => block.linkedBlockIds?.includes(b.id))?.content
         });
       }
       return isStudyItem;
@@ -53,7 +53,7 @@ export default function StudyModeSelector({
   // Count notes that have study items
   const notesWithStudyItems = folderNotes.filter((note) => {
     const hasStudyItems = note.blocks.some((block) => {
-      const isStudyItem = block.type === "who" && block.linkedBlockId;
+      const isStudyItem = block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0;
       if (isStudyItem) {
         console.log(`Note ${note.title} has study items`);
       }
@@ -150,6 +150,30 @@ export default function StudyModeSelector({
                   <Button className="w-full" onClick={() => onSelectMode("quiz")}>
                     Start Quiz <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
+                </CardFooter>
+              </Card>
+
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader className="bg-yellow-50 dark:bg-yellow-900/20 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2">
+                    <Brain className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+                    Test Mode
+                  </CardTitle>
+                  <CardDescription>Simulate a timed test with randomized questions from your notes.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Take a full test with a timer, question navigation, and score summary. Great for exam practice!
+                  </p>
+                  <div className="mt-4 bg-yellow-50 dark:bg-yellow-900/10 p-3 rounded-md">
+                    <div className="flex items-center gap-2 text-sm text-yellow-700 dark:text-yellow-300">
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Best for simulating real exam conditions</span>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <Button className="w-full" onClick={() => onSelectMode("test")}>Start Test <ArrowRight className="w-4 h-4 ml-2" /></Button>
                 </CardFooter>
               </Card>
             </div>

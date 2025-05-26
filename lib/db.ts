@@ -52,10 +52,27 @@ export interface Operation {
   };
 }
 
+export interface TestSession {
+  id: string;
+  noteId: string; // Or folderId if you allow testing entire folders
+  folderId?: string; // Optional: present if this is a folder test session
+  startTime: number;
+  endTime?: number;
+  duration: number; // In seconds
+  questions: {
+    blockId: string;
+    userAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+  }[];
+  score: number; // As a percentage or raw value
+}
+
 export class StudyNotebookDB extends Dexie {
   notes!: Table<Note>;
   folders!: Table<Folder>;
   operations!: Table<Operation>;
+  testSessions!: Table<TestSession>;
 
   constructor() {
     super('StudyNotebookDB');
@@ -79,6 +96,13 @@ export class StudyNotebookDB extends Dexie {
       notes: 'id, title, folderId, updatedAt, lastStudied, tags, order',
       folders: 'id, name, parentId, description, createdAt, order, path',
       operations: '++id, type, timestamp, data'
+    });
+
+    this.version(5).stores({
+      notes: 'id, title, folderId, updatedAt, lastStudied, tags, order',
+      folders: 'id, name, parentId, description, createdAt, order, path',
+      operations: '++id, type, timestamp, data',
+      testSessions: 'id, noteId, folderId, startTime'
     });
   }
 
@@ -253,4 +277,12 @@ export async function reorderItems(
 
 export async function recordOperation(operation: Omit<Operation, 'id'>): Promise<void> {
   await db.operations.add(operation);
+}
+
+export async function saveTestSession(session: TestSession): Promise<void> {
+  await db.testSessions.put(session);
+}
+
+export async function getSessionsForNote(noteId: string): Promise<TestSession[]> {
+  return db.testSessions.where('noteId').equals(noteId).reverse().toArray();
 }

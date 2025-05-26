@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { BookOpen, Brain, Plus, ArrowRight, CheckCircle, Edit } from "lucide-react"
+import { BookOpen, Brain, Plus, ArrowRight, CheckCircle, Edit, ListChecks, Timer, CreditCard } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
@@ -10,7 +10,7 @@ interface FolderStudyModeProps {
   folderName: string
   folderDescription?: string
   folderNotes: Note[]
-  onSelectMode: (mode: "flashcards" | "quiz") => void
+  onSelectMode: (mode: "flashcards" | "quiz" | "test") => void
   onCreateNote: () => void
   onEditDescription?: (description: string) => void
 }
@@ -28,12 +28,12 @@ export default function FolderStudyMode({
 
   // Count total study items (WHO/WHAT pairs)
   const totalStudyItems = folderNotes.reduce((total, note) => {
-    return total + note.blocks.filter((block) => block.type === "who" && block.linkedBlockId).length
+    return total + note.blocks.filter((block) => block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0).length
   }, 0)
 
   // Count notes that have study items
   const notesWithStudyItems = folderNotes.filter((note) =>
-    note.blocks.some((block) => block.type === "who" && block.linkedBlockId),
+    note.blocks.some((block) => block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0),
   ).length
 
   return (
@@ -72,8 +72,9 @@ export default function FolderStudyMode({
               {notesWithStudyItems === 1 ? "note" : "notes"}
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Card className="hover:shadow-lg transition-shadow">
+            <div className="flex flex-row gap-6 w-full overflow-x-auto pb-2 md:justify-center md:gap-16">
+              {/* Flashcard Study Card */}
+              <Card className="min-w-[320px] max-w-sm flex-1 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
                 <CardHeader className="bg-blue-50 dark:bg-blue-900/20 rounded-t-lg">
                   <CardTitle className="flex items-center gap-2">
                     <BookOpen className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -93,16 +94,15 @@ export default function FolderStudyMode({
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button className="w-full" onClick={() => onSelectMode("flashcards")}>
-                    Start Flashcards <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
+                  <Button className="w-full" onClick={() => onSelectMode("flashcards")}>Start Flashcards <ArrowRight className="w-4 h-4 ml-2" /></Button>
                 </CardFooter>
               </Card>
 
-              <Card className="hover:shadow-lg transition-shadow">
+              {/* Quiz Mode Card */}
+              <Card className="min-w-[320px] max-w-sm flex-1 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
                 <CardHeader className="bg-green-50 dark:bg-green-900/20 rounded-t-lg">
                   <CardTitle className="flex items-center gap-2">
-                    <Brain className="w-5 h-5 text-green-600 dark:text-green-400" />
+                    <ListChecks className="w-5 h-5 text-green-600 dark:text-green-400" />
                     Quiz Mode
                   </CardTitle>
                   <CardDescription>Test your knowledge with quizzes</CardDescription>
@@ -119,9 +119,32 @@ export default function FolderStudyMode({
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button className="w-full" onClick={() => onSelectMode("quiz")}>
-                    Start Quiz <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
+                  <Button className="w-full" onClick={() => onSelectMode("quiz")}>Start Quiz <ArrowRight className="w-4 h-4 ml-2" /></Button>
+                </CardFooter>
+              </Card>
+
+              {/* Test Mode Card */}
+              <Card className="min-w-[320px] max-w-sm flex-1 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+                <CardHeader className="bg-yellow-50 dark:bg-yellow-900/20 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2">
+                    <Timer className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+                    Test Mode
+                  </CardTitle>
+                  <CardDescription>Simulate a timed test with randomized questions from your notes.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Take a full test with a timer, question navigation, and score summary. Great for exam practice!
+                  </p>
+                  <div className="mt-4 bg-yellow-50 dark:bg-yellow-900/10 p-3 rounded-md">
+                    <div className="flex items-center gap-2 text-sm text-yellow-700 dark:text-yellow-300">
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Best for simulating real exam conditions</span>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <Button className="w-full" onClick={() => onSelectMode("test")}>Start Test <ArrowRight className="w-4 h-4 ml-2" /></Button>
                 </CardFooter>
               </Card>
             </div>

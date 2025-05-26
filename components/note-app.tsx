@@ -17,6 +17,7 @@ import { useToast } from "@/components/ui/use-toast"
 import FolderStudyMode from "@/components/folder-study-mode"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useTheme } from 'next-themes'
+import TestView from "@/components/testview"
 
 export type Block = {
   id: string
@@ -39,7 +40,7 @@ export default function NoteApp() {
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
-  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | null>(null);
+  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | null>(null);
   const [showStudyModeSelector, setShowStudyModeSelector] = useState(false);
   const [showDashboard, setShowDashboard] = useState(true);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -350,11 +351,11 @@ export default function NoteApp() {
     // This prevents the infinite update loop
   }
 
-  const selectStudyMode = (mode: "flashcards" | "quiz") => {
+  const selectStudyMode = (mode: "flashcards" | "quiz" | "test") => {
     setActiveNote(null);
     setView(mode);
     setShowStudyModeSelector(false);
-  }
+  };
 
   const getFolderNotes = async (folderId: string): Promise<Note[]> => {
     try {
@@ -763,6 +764,7 @@ export default function NoteApp() {
                   <TabsTrigger value="editor">Editor</TabsTrigger>
                   <TabsTrigger value="flashcards">Flashcards</TabsTrigger>
                   <TabsTrigger value="quiz">Quiz</TabsTrigger>
+                  <TabsTrigger value="test">Test</TabsTrigger>
                 </TabsList>
                 <div className="flex items-center">
                   <DropdownMenu>
@@ -808,6 +810,16 @@ export default function NoteApp() {
                   }}
                 />
               </TabsContent>
+
+              <TabsContent value="test" className="flex-1 p-0 m-0 h-full overflow-hidden">
+                <TestView
+                  availableFolders={folders.map(f => ({ id: f.id, name: f.name }))}
+                  availableNotes={notes.map(n => ({ id: n.id, title: n.title, folderId: n.folderId }))}
+                  defaultNoteId={activeNote.id}
+                  autoStartIfDefault={true}
+                  onTestComplete={() => setView(null)}
+                />
+              </TabsContent>
             </Tabs>
           </div>
         )}
@@ -828,6 +840,16 @@ export default function NoteApp() {
               // Update stats in a single operation
               updateStudyStats(noteId, "quiz", true, score, total);
             }}
+          />
+        )}
+
+        {view === "test" && activeFolder && !activeNote && !showDashboard && (
+          <TestView
+            availableFolders={folders.map(f => ({ id: f.id, name: f.name }))}
+            availableNotes={notes.map(n => ({ id: n.id, title: n.title, folderId: n.folderId }))}
+            defaultFolderId={activeFolder || undefined}
+            autoStartIfDefault={true}
+            onTestComplete={() => setView(null)}
           />
         )}
 
