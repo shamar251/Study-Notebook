@@ -79,15 +79,15 @@ function generateTestQuestions(notes: Note[]): any[] {
   const quizQuestions: any[] = [];
   function addQuizQuestionsFromBlocks(blocks: Block[], noteId: string, noteTitle: string, noteObj: Note) {
     blocks.forEach((block) => {
-      // True/False questions: only WHO as question, WHAT as statement, user picks True/False
+      // True/False questions: use WHAT block as the statement, answer is its truthState
       if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
         const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
         if (whatBlock && whatBlock.truthState) {
-          const statement = whatBlock.originalContent || whatBlock.content;
+          const statement = block.content; // Use WHO block's content as the question
           quizQuestions.push({
             id: block.id + "-tf",
             type: "true/false",
-            content: statement,
+            content: statement, // Use WHO block's content as the question
             answer: whatBlock.truthState === "true" ? "True" : "False",
             options: ["True", "False"].sort(() => Math.random() - 0.5),
             noteId,
@@ -96,18 +96,18 @@ function generateTestQuestions(notes: Note[]): any[] {
           return;
         }
       }
-      // Only generate the question where the 'who' is the answer and the 'what' is the question
+      // Reverse: WHO is the question, WHAT is the answer
       if (block.type === "who") {
         if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
           const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
           if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "") {
             if (!whatBlock.truthState) {
-              // Create a question from the 'what' asking about the 'who' (only this direction)
+              // Create a question from the 'who' asking about the 'what' (reverse direction)
               quizQuestions.push({
-                id: block.id + "-who",
+                id: block.id + "-who-rev",
                 type: "who",
-                content: whatBlock.content.toLowerCase(),
-                answer: block.content,
+                content: block.content,
+                answer: whatBlock.content,
                 options: [],
                 noteId,
                 noteTitle,
@@ -122,10 +122,10 @@ function generateTestQuestions(notes: Note[]): any[] {
             if (whatBlock.type === "what" && whatBlock.content && whatBlock.content.trim() !== "") {
               if (!whatBlock.truthState) {
                 quizQuestions.push({
-                  id: block.id + "-who-old",
+                  id: block.id + "-who-old-rev",
                   type: "who",
-                  content: whatBlock.content.toLowerCase(),
-                  answer: block.content,
+                  content: block.content,
+                  answer: whatBlock.content,
                   options: [],
                   noteId,
                   noteTitle,
@@ -253,7 +253,7 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
       ...q,
       options: q.type === "true/false"
         ? ["True", "False"].sort(() => Math.random() - 0.5)
-        : generateOptions(q.answer, uniqueNotes, q.type === "who" ? "who" : "what"),
+        : generateOptions(q.answer, uniqueNotes, "what"),
     }));
     setQuestions(testQuestions);
   }
