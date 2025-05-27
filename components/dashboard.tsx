@@ -112,7 +112,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
   }
 
   return (
-    <div className="flex-1 overflow-auto">
+    <div className="flex-1 overflow-auto hide-scrollbar">
       <div className="max-w-6xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-3xl font-bold">Dashboard</h1>
@@ -505,3 +505,13 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
     </div>
   )
 }
+
+// To hide the scrollbar, add the following CSS to your global stylesheet (e.g., styles/globals.css):
+//
+// .hide-scrollbar {
+//   scrollbar-width: none; /* Firefox */
+//   -ms-overflow-style: none;  /* IE and Edge */
+// }
+// .hide-scrollbar::-webkit-scrollbar {
+//   display: none; /* Chrome, Safari, Opera */
+// }

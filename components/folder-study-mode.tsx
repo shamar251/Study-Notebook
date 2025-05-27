@@ -72,13 +72,13 @@ export default function FolderStudyMode({
               {notesWithStudyItems === 1 ? "note" : "notes"}
             </p>
 
-            <div className="flex flex-row gap-6 w-full overflow-x-auto pb-2 md:justify-center md:gap-16">
+            <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-10 justify-items-center">
               {/* Flashcard Study Card */}
               <Card className="min-w-[320px] max-w-sm flex-1 border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
                 <CardHeader className="bg-blue-50 dark:bg-blue-900/20 rounded-t-lg">
                   <CardTitle className="flex items-center gap-2">
                     <BookOpen className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                    Flashcard Study
+                    Flash Cards
                   </CardTitle>
                   <CardDescription>Review with interactive flashcards</CardDescription>
                 </CardHeader>
