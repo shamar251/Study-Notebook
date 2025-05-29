@@ -9,6 +9,7 @@ export interface Note {
   updatedAt: number;
   lastStudied?: number;
   order: number;
+  deletedAt?: number;
   studyStats?: {
     quizAttempts: number;
     quizCorrect: number;
@@ -36,6 +37,7 @@ export interface Folder {
   createdAt: number;
   order: number;
   path: string[];
+  deletedAt?: number;
 }
 
 export interface Operation {
@@ -101,6 +103,13 @@ export class StudyNotebookDB extends Dexie {
     this.version(5).stores({
       notes: 'id, title, folderId, updatedAt, lastStudied, tags, order',
       folders: 'id, name, parentId, description, createdAt, order, path',
+      operations: '++id, type, timestamp, data',
+      testSessions: 'id, noteId, folderId, startTime'
+    });
+
+    this.version(6).stores({
+      notes: 'id, title, folderId, updatedAt, lastStudied, tags, order, deletedAt',
+      folders: 'id, name, parentId, description, createdAt, order, path, deletedAt',
       operations: '++id, type, timestamp, data',
       testSessions: 'id, noteId, folderId, startTime'
     });
@@ -285,4 +294,89 @@ export async function saveTestSession(session: TestSession): Promise<void> {
 
 export async function getSessionsForNote(noteId: string): Promise<TestSession[]> {
   return db.testSessions.where('noteId').equals(noteId).reverse().toArray();
+}
+
+export async function moveToTrash(itemId: string, itemType: 'folder' | 'note'): Promise<void> {
+  if (itemType === 'folder') {
+    const folder = await db.folders.get(itemId);
+    if (folder) {
+      await db.folders.put({
+        ...folder,
+        deletedAt: Date.now()
+      });
+      // Also move all child folders and notes to trash
+      const childFolders = await db.folders.where('parentId').equals(itemId).toArray();
+      for (const child of childFolders) {
+        await moveToTrash(child.id, 'folder');
+      }
+      const childNotes = await db.notes.where('folderId').equals(itemId).toArray();
+      for (const note of childNotes) {
+        await moveToTrash(note.id, 'note');
+      }
+    }
+  } else {
+    const note = await db.notes.get(itemId);
+    if (note) {
+      await db.notes.put({
+        ...note,
+        deletedAt: Date.now()
+      });
+    }
+  }
+}
+
+export async function restoreFromTrash(itemId: string, itemType: 'folder' | 'note'): Promise<void> {
+  if (itemType === 'folder') {
+    const folder = await db.folders.get(itemId);
+    if (folder) {
+      await db.folders.put({
+        ...folder,
+        deletedAt: undefined
+      });
+      // Also restore all child folders and notes
+      const childFolders = await db.folders.where('parentId').equals(itemId).toArray();
+      for (const child of childFolders) {
+        await restoreFromTrash(child.id, 'folder');
+      }
+      const childNotes = await db.notes.where('folderId').equals(itemId).toArray();
+      for (const note of childNotes) {
+        await restoreFromTrash(note.id, 'note');
+      }
+    }
+  } else {
+    const note = await db.notes.get(itemId);
+    if (note) {
+      let folderId = note.folderId;
+      if (folderId && folderId !== 'root') {
+        const parentFolder = await db.folders.get(folderId);
+        if (parentFolder?.deletedAt) {
+          // Parent folder is still deleted, move note to root
+          folderId = 'root';
+        }
+      }
+      await db.notes.put({
+        ...note,
+        deletedAt: undefined,
+        folderId,
+      });
+    }
+  }
+}
+
+export async function permanentDelete(itemId: string, itemType: 'folder' | 'note'): Promise<void> {
+  if (itemType === 'folder') {
+    // First delete all child folders and notes
+    const childFolders = await db.folders.where('parentId').equals(itemId).toArray();
+    for (const child of childFolders) {
+      await permanentDelete(child.id, 'folder');
+    }
+    const childNotes = await db.notes.where('folderId').equals(itemId).toArray();
+    for (const note of childNotes) {
+      await permanentDelete(note.id, 'note');
+    }
+    // Then delete the folder itself
+    await db.folders.delete(itemId);
+  } else {
+    await db.notes.delete(itemId);
+  }
 }

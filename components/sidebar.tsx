@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import {
   ChevronDown,
   ChevronRight,
@@ -17,6 +17,8 @@ import {
   FolderPlus,
   Layout,
   Settings,
+  Star,
+  RotateCcw,
 } from "lucide-react"
 import {
   DndContext,
@@ -71,9 +73,10 @@ interface SidebarProps {
   notes: Note[]
   activeNote: Note | null
   activeFolder: string | null
+  setActiveFolder: (folderId: string | null) => void
   onFolderClick: (folderId: string) => void
   onFolderDropdownClick: (folderId: string) => void
-  setActiveNote: (note: Note) => void
+  setActiveNote: (note: Note | null) => void
   createFolder: (name: string, parentId: string | null, description?: string) => void
   deleteNote: (noteId: string) => void
   onDashboardClick: () => void
@@ -89,6 +92,8 @@ interface SidebarProps {
   onToggleDarkMode: () => void
   onImport: () => void
   onExport: () => void
+  restoreItem: (itemId: string, itemType: 'folder' | 'note') => void
+  permanentDeleteItem: (itemId: string, itemType: 'folder' | 'note') => void
 }
 
 // Custom alphanumeric sort: numbers first, then letters (case-insensitive)
@@ -108,6 +113,7 @@ export default function Sidebar({
   notes,
   activeNote,
   activeFolder,
+  setActiveFolder,
   onFolderClick,
   onFolderDropdownClick,
   setActiveNote,
@@ -126,6 +132,8 @@ export default function Sidebar({
   onToggleDarkMode,
   onImport,
   onExport,
+  restoreItem,
+  permanentDeleteItem,
 }: SidebarProps) {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     root: true,
@@ -143,8 +151,26 @@ export default function Sidebar({
   const [overId, setOverId] = useState<string | null>(null)
   const [dragMode, setDragMode] = useState<'reorder' | 'move' | null>(null)
   const [dragStartPosition, setDragStartPosition] = useState<{ x: number; y: number } | null>(null)
-  const [navSection, setNavSection] = useState<'notes' | 'search'>('notes')
+  const [navSection, setNavSection] = useState<'notes' | 'search' | 'trash'>('notes')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null);
+  const settingsBtnRef = useRef<HTMLDivElement>(null);
+
+  // Add mouse move handler
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (showSettingsMenu) {
+        const windowHeight = window.innerHeight;
+        if (e.clientY < windowHeight / 2) {
+          setShowSettingsMenu(false);
+        }
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, [showSettingsMenu]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -309,26 +335,34 @@ export default function Sidebar({
     onFolderClick(folderId);
   };
 
+  // Filter out deleted items for normal view
+  const activeFolders = folders.filter(folder => !folder.deletedAt);
+  const activeNotes = notes.filter(note => !note.deletedAt);
+
+  // Get deleted items for trash view
+  const deletedFolders = folders.filter(folder => folder.deletedAt);
+  const deletedNotes = notes.filter(note => note.deletedAt);
+
   const renderFolderTree = (parentId: string | null, depth = 0) => {
-    const childFolders = folders
+    const childFolders = activeFolders
       .filter((folder) => folder.parentId === parentId)
       .sort(alphaNumSort);
 
     // Only show root-level notes at the root
     const rootLevelNotes = parentId === null
-      ? notes.filter(note => note.folderId === 'root')
+      ? activeNotes.filter(note => note.folderId === 'root')
       : [];
 
     return (
-      <div id={parentId === null ? 'root-container' : undefined} className="relative">
+      <div id={parentId === null ? 'root-container' : undefined} className="flex-1 overflow-auto p-0">
         {/* Render folders first */}
         {childFolders.map((folder) => {
           const isExpanded = expandedFolders[folder.id] || false;
           // Only show notes whose folderId exactly matches this folder (not 'root' or other folders)
           const childNotes = isExpanded
-            ? notes.filter((note) => note.folderId === folder.id).sort(alphaNumSort)
+            ? activeNotes.filter((note) => note.folderId === folder.id).sort(alphaNumSort)
             : [];
-          const hasChildren = folders.some((f) => f.parentId === folder.id) || childNotes.length > 0;
+          const hasChildren = activeFolders.some((f) => f.parentId === folder.id) || childNotes.length > 0;
           const folderNoteCount = countFolderNotes(folder.id);
 
           return (
@@ -339,11 +373,15 @@ export default function Sidebar({
                   type="folder"
                   name={folder.name}
                   depth={depth}
-                  isActive={activeFolder === folder.id}
+                  isActive={activeFolder === folder.id && !activeNote}
                   noteCount={folderNoteCount}
                   isExpanded={isExpanded}
                   hasChildren={hasChildren}
-                  onClick={() => handleFolderRowClick(folder.id)}
+                  onClick={() => {
+                    setActiveNote(null);
+                    setActiveFolder(folder.id);
+                    handleFolderRowClick(folder.id);
+                  }}
                   onToggle={(e) => toggleFolder(folder.id, e)}
                   isOver={overId === `folder-${folder.id}`}
                   dragMode={null}
@@ -410,7 +448,10 @@ export default function Sidebar({
                           name={note.title}
                           depth={depth + 1}
                           isActive={activeNote?.id === note.id}
-                          onClick={() => setActiveNote(note)}
+                          onClick={() => {
+                            setActiveFolder(null);
+                            setActiveNote(note);
+                          }}
                           isOver={overId === `note-${note.id}`}
                           dragMode={null}
                         />
@@ -445,9 +486,12 @@ export default function Sidebar({
                 id={`note-${note.id}`}
                 type="note"
                 name={note.title}
-                depth={depth}
+                depth={0}
                 isActive={activeNote?.id === note.id}
-                onClick={() => setActiveNote(note)}
+                onClick={() => {
+                  setActiveFolder(null);
+                  setActiveNote(note);
+                }}
                 isOver={overId === `note-${note.id}`}
                 dragMode={null}
               />
@@ -479,6 +523,61 @@ export default function Sidebar({
     setIsDialogOpen(true);
   }
 
+  const renderTrashContent = () => {
+    return (
+      <div className="flex-1 overflow-auto p-1">
+        {deletedFolders.length === 0 && deletedNotes.length === 0 ? (
+          <div className="p-4 text-muted-foreground text-center">Trash is empty</div>
+        ) : (
+          <div>
+            {deletedFolders.map((folder) => (
+              <ContextMenu key={folder.id}>
+                <ContextMenuTrigger>
+                  <div className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20">
+                    <FolderIcon className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate text-sm">{folder.name}</span>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-56">
+                  <ContextMenuItem onClick={() => restoreItem(folder.id, 'folder')}>
+                    <RotateCcw className="w-4 h-4 mr-2" /> Restore
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() => permanentDeleteItem(folder.id, 'folder')}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" /> Delete Permanently
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            {deletedNotes.map((note) => (
+              <ContextMenu key={note.id}>
+                <ContextMenuTrigger>
+                  <div className="flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20">
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate text-sm">{note.title}</span>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-56">
+                  <ContextMenuItem onClick={() => restoreItem(note.id, 'note')}>
+                    <RotateCcw className="w-4 h-4 mr-2" /> Restore
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() => permanentDeleteItem(note.id, 'note')}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" /> Delete Permanently
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <DndContext
       sensors={sensors}
@@ -499,16 +598,42 @@ export default function Sidebar({
             >
               <Home className="w-5 h-5 mb-1.5" />
             </div>
-            {/* Add more nav icons here if needed */}
           </div>
           <div>
-            {/* Settings icon in footer */}
-            <div
-              className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer hover:bg-accent/20 text-muted-foreground mb-2"
-              title="Settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings className="w-5 h-5 mt-5" />
+            {/* Settings button with hover-revealed extra buttons */}
+            <div className="relative">
+              {/* Floating menu */}
+              {showSettingsMenu && (
+                <div
+                  ref={menuRef}
+                  className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center space-y-2 z-50"
+                >
+                  <button
+                    className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer bg-background hover:bg-accent/20 text-muted-foreground"
+                    title="Feedback"
+                    onClick={() => { /* handle feedback */ }}
+                  >
+                    <Star className="w-5 h-5" />
+                  </button>
+                  <button
+                    className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer bg-background hover:bg-accent/20 text-muted-foreground"
+                    title="Trash"
+                    onClick={() => setNavSection('trash')}
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+              {/* Settings Button */}
+              <div
+                ref={settingsBtnRef}
+                className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer hover:bg-accent/20 text-muted-foreground mb-2"
+                title="Settings"
+                onClick={() => setSettingsOpen(true)}
+                onMouseEnter={() => setShowSettingsMenu(true)}
+              >
+                <Settings className="w-5 h-5 mt-5" />
+              </div>
             </div>
           </div>
         </div>
@@ -532,59 +657,59 @@ export default function Sidebar({
                 onClick={() => setNavSection('notes')}
               >
                 <FolderIcon className="h-4 w-4" strokeWidth={1.5} />
-                {/* No label for minimal look, or add 'Notes' if you want */}
               </button>
               <button
                 className={`px-2 py-1 rounded-md text-sm font-medium flex items-center gap-1 ${navSection === 'search' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/20'}`}
                 onClick={() => setNavSection('search')}
               >
                 <Search className="h-4 w-4" strokeWidth={1.5} />
-                {/* No label for minimal look, or add 'Search' if you want */}
               </button>
             </div>
           </div>
 
-          {/* Action bar for new note/folder/parent folder - now just below nav */}
-          <div className="flex items-center justify-start gap-1 border-b border-border bg-background/95 py-1 pl-2">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
-                    onClick={createNewNote}
-                    title="New note"
-                  >
-                    <FileText className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>New note</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
-                    onClick={handleNewFolderButton}
-                    title="New folder"
-                  >
-                    <FolderPlus className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>New folder</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
-                    onClick={handleCreateParentFolder}
-                    title="New parent folder"
-                  >
-                    <Layout className="h-4 w-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>New parent folder</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
+          {/* Action bar - only show for notes section */}
+          {navSection === 'notes' && (
+            <div className="flex items-center justify-start gap-1 border-b border-border bg-background/95 py-1 pl-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
+                      onClick={createNewNote}
+                      title="New note"
+                    >
+                      <FileText className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>New note</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
+                      onClick={handleNewFolderButton}
+                      title="New folder"
+                    >
+                      <FolderPlus className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>New folder</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
+                      onClick={handleCreateParentFolder}
+                      title="New parent folder"
+                    >
+                      <Layout className="h-4 w-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>New parent folder</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
 
           {/* Search bar, only visible when 'search' tab is active */}
           {navSection === 'search' && (
@@ -599,30 +724,30 @@ export default function Sidebar({
             </div>
           )}
 
-          {/* Main content: notes/folders or search */}
-          <div className="flex-1 overflow-auto p-1">
-            {navSection === 'notes' ? (
-              renderFolderTree(null)
+          {/* Main content: notes/folders, search, or trash */}
+          {navSection === 'notes' ? (
+            renderFolderTree(null)
+          ) : navSection === 'search' ? (
+            // Search results list
+            activeNotes.length > 0 ? (
+              <div className="flex-1 overflow-auto p-1">
+                {activeNotes.map((note) => (
+                  <div
+                    key={note.id}
+                    className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20 ${activeNote?.id === note.id ? 'bg-accent/30' : ''}`}
+                    onClick={() => setActiveNote(note)}
+                  >
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate text-sm">{note.title}</span>
+                  </div>
+                ))}
+              </div>
             ) : (
-              // Search results list
-              notes.length > 0 ? (
-                <div>
-                  {notes.map((note) => (
-                    <div
-                      key={note.id}
-                      className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20 ${activeNote?.id === note.id ? 'bg-accent/30' : ''}`}
-                      onClick={() => setActiveNote(note)}
-                    >
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                      <span className="truncate text-sm">{note.title}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 text-muted-foreground text-center">No results found.</div>
-              )
-            )}
-          </div>
+              <div className="p-4 text-muted-foreground text-center">No results found.</div>
+            )
+          ) : (
+            renderTrashContent()
+          )}
 
           {/* Footer section */}
 

@@ -77,7 +77,7 @@ export function DraggableItem({
   };
 
   // Calculate the base indentation
-  const baseIndent = type === 'note' ? 24 : 0; // 24px extra indent for notes
+  const baseIndent = type === 'note' && depth > 0 ? 24 : 0;
   const totalIndent = (depth * 12) + baseIndent;
 
   return (
@@ -94,7 +94,7 @@ export function DraggableItem({
     >
       {renderIndentation()}
       <div className="flex items-center flex-1 min-w-0">
-        {type === 'folder' && (
+        {type === 'folder' ? (
           <div
             className="w-4 h-4 p-0 mr-1 text-muted-foreground cursor-pointer flex items-center justify-center"
             onClick={onToggle}
@@ -109,6 +109,8 @@ export function DraggableItem({
               <div className="w-3" />
             )}
           </div>
+        ) : (
+          depth === 0 && <div className="w-4 h-4 mr-1" />
         )}
         {type === 'folder' ? (
           <FolderIcon className="w-4 h-4 mr-2 text-muted-foreground" />
@@ -121,7 +123,7 @@ export function DraggableItem({
           <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 px-3 py-2 rounded bg-black text-white text-xs shadow-lg whitespace-nowrap z-50 pointer-events-none">
             <FolderIcon className="inline w-4 h-4 mr-1 -mt-0.5" />
             <span className="font-semibold">{name}</span>
-            <span className="ml-1 text-muted-foreground">Move into “{name}”</span>
+            <span className="ml-1 text-muted-foreground">Move into "{name}"</span>
           </div>
         )}
       </div>

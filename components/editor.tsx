@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus } from "lucide-react"
+import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus, Link as LinkIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -804,15 +804,19 @@ export default function Editor({ note, updateNote }: EditorProps) {
                 </button>
               )}
               {block.type === "who" && (
-                isWhoBlockConnected(block, blocks) ? (
-                  <span className="text-xs text-amber-600 dark:text-amber-400">
-                    {Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0
-                      ? `Linked WHAT blocks: ${countConnectedWhatBlocks(block, blocks)}`
-                      : `Linked to WHAT block`}
-                  </span>
-                ) : (
-                  <span className="text-xs text-amber-600 dark:text-amber-400">Needs a linked WHAT block</span>
-                )
+                <span className="flex items-center ml-auto">
+                  {isWhoBlockConnected(block, blocks) ? (
+                    <span className="flex items-center text-xs text-black dark:text-white px-1 py-0.5">
+                      {Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0
+                        ? countConnectedWhatBlocks(block, blocks)
+                        : 1}
+                      <LinkIcon className="w-3.5 h-3.5 ml-1 inline" />
+
+                    </span>
+                  ) : (
+                    <span className="text-xs text-amber-600 dark:text-amber-400"><LinkIcon className="w-3.5 h-3.5 ml-1 inline " /></span>
+                  )}
+                </span>
               )}
               {block.type === "what" && (
                 <button

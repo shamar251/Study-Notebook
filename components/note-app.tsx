@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Plus, Search, Settings, BookOpen, Brain, Save, FolderOpen, Trash2, MoreHorizontal } from "lucide-react"
 import { useNotes, useFolders, addNote, updateNote, deleteNote, addFolder, updateFolder, deleteFolder, searchNotes, getAllChildFolderIds } from "@/hooks/use-db"
-import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, updateFolderPath, type Note as DBNote, type Folder as DBFolder } from "@/lib/db"
+import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, updateFolderPath, type Note as DBNote, type Folder as DBFolder, moveToTrash, restoreFromTrash, permanentDelete } from "@/lib/db"
 import Sidebar from "@/components/sidebar"
 import Editor from "@/components/editor"
 import StudyModeSelector from "@/components/study-mode-selector"
@@ -178,33 +178,25 @@ export default function NoteApp() {
   };
 
   const deleteNoteHandler = async (noteId: string) => {
-    // Ensure noteId has the correct prefix
     const fullNoteId = noteId.startsWith('note-') ? noteId : `note-${noteId}`;
-
     try {
-      // First, update the UI state
       if (activeNote?.id === fullNoteId) {
         setActiveNote(null);
         setView(null);
         setShowStudyModeSelector(false);
         setShowDashboard(true);
       }
-
-      // Then delete from database
-      await deleteNote(fullNoteId);
-
-      // Finally, reload notes to ensure UI is updated
+      await moveToTrash(fullNoteId, 'note');
       await reloadNotes();
-
       toast({
-        title: "Note deleted",
-        description: "The note has been permanently deleted.",
+        title: "Note moved to trash",
+        description: "The note has been moved to trash.",
       });
     } catch (error) {
-      console.error('Error deleting note:', error);
+      console.error('Error moving note to trash:', error);
       toast({
         title: "Error",
-        description: "Failed to delete note. Please try again.",
+        description: "Failed to move note to trash. Please try again.",
         variant: "destructive",
       });
     }
@@ -242,33 +234,25 @@ export default function NoteApp() {
   };
 
   const deleteFolderHandler = async (folderId: string) => {
-    const folderToDelete = folders.find((f) => f.id === folderId);
-    if (!folderToDelete) return;
-
-    const parentFolderId = folderToDelete.parentId || null;
-    const targetFolderId = parentFolderId || "root";
-
-    // Move all notes from this folder to the parent folder
-    const notesToUpdate = notes.filter(note => note.folderId === folderId);
-    for (const note of notesToUpdate) {
-      await updateNote({ ...note, folderId: targetFolderId });
+    try {
+      await moveToTrash(folderId, 'folder');
+      await reloadNotes();
+      setFolders(await db.folders.toArray());
+      if (activeFolder === folderId) {
+        setActiveFolder(null);
+      }
+      toast({
+        title: "Folder moved to trash",
+        description: "The folder has been moved to trash.",
+      });
+    } catch (error) {
+      console.error('Error moving folder to trash:', error);
+      toast({
+        title: "Error",
+        description: "Failed to move folder to trash. Please try again.",
+        variant: "destructive",
+      });
     }
-
-    await deleteFolder(folderId);
-
-    // Reload notes to ensure UI is updated
-    await reloadNotes();
-
-    setFolders(prev => prev.filter(f => f.id !== folderId));
-
-    if (activeFolder === folderId) {
-      setActiveFolder(parentFolderId);
-    }
-
-    toast({
-      title: "Folder deleted",
-      description: `Folder "${folderToDelete.name}" has been deleted. All notes have been moved to the parent folder.`,
-    });
   };
 
   const renameFolderHandler = async (folderId: string, newName: string) => {
@@ -423,6 +407,7 @@ export default function NoteApp() {
       setFolderNotes(noteOrFolderId); // Show all notes in the folder
     } else {
       setActiveNote(noteOrFolderId);
+      setActiveFolder(null);
       setView(mode);
       setShowStudyModeSelector(false);
       setShowDashboard(false);
@@ -602,8 +587,15 @@ export default function NoteApp() {
           };
           await db.notes.put(updatedNote);
 
-          // Reload notes to ensure UI is updated
-          await reloadNotes();
+          // Reload notes and folders to ensure UI is updated
+          const allNotes = await db.notes.toArray();
+          setNotes(allNotes);
+          setFolders(await db.folders.toArray());
+
+          // If the moved note is the active note, update activeNote state
+          if (activeNote?.id === note.id) {
+            setActiveNote(allNotes.find(n => n.id === note.id) || null);
+          }
           return;
         }
 
@@ -620,8 +612,15 @@ export default function NoteApp() {
         };
         await db.notes.put(updatedNote);
 
-        // Reload notes to ensure UI is updated
-        await reloadNotes();
+        // Reload notes and folders to ensure UI is updated
+        const allNotes = await db.notes.toArray();
+        setNotes(allNotes);
+        setFolders(await db.folders.toArray());
+
+        // If the moved note is the active note, update activeNote state
+        if (activeNote?.id === note.id) {
+          setActiveNote(allNotes.find(n => n.id === note.id) || null);
+        }
       }
     } catch (error) {
       console.error('Error moving item:', error);
@@ -692,6 +691,18 @@ export default function NoteApp() {
   const darkMode = theme === 'dark';
   const onToggleDarkMode = () => setTheme(theme === 'dark' ? 'light' : 'dark');
 
+  const handleRestoreItem = async (itemId: string, itemType: 'folder' | 'note') => {
+    await restoreFromTrash(itemId, itemType);
+    await reloadNotes();
+    setFolders(await db.folders.toArray());
+  };
+
+  const handlePermanentDelete = async (itemId: string, itemType: 'folder' | 'note') => {
+    await permanentDelete(itemId, itemType);
+    await reloadNotes();
+    setFolders(await db.folders.toArray());
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
@@ -699,10 +710,12 @@ export default function NoteApp() {
         notes={filteredNotes}
         activeNote={activeNote}
         activeFolder={activeFolder}
+        setActiveFolder={setActiveFolder}
         onFolderClick={handleFolderClick}
         onFolderDropdownClick={handleFolderDropdownClick}
         setActiveNote={(note) => {
-          openNote(note)
+          if (note) openNote(note);
+          else setActiveNote(null);
         }}
         createFolder={createFolderHandler}
         deleteNote={deleteNoteHandler}
@@ -719,6 +732,8 @@ export default function NoteApp() {
         onToggleDarkMode={onToggleDarkMode}
         onImport={openFromFile}
         onExport={saveToFile}
+        restoreItem={handleRestoreItem}
+        permanentDeleteItem={handlePermanentDelete}
       />
       <div className="flex flex-col flex-1 overflow-hidden">
 
@@ -798,15 +813,25 @@ export default function NoteApp() {
               </TabsContent>
 
               <TabsContent value="flashcards" className="flex-1 p-0 m-0 h-full overflow-hidden">
-                <FlashcardView note={activeNote} onComplete={() => updateStudyStats(activeNote.id, "flashcards")} />
+                <FlashcardView
+                  note={activeNote}
+                  notes={!activeNote ? folderNotes : undefined}
+                  folderName={folders.find((f) => f.id === activeFolder)?.name || "Study"}
+                  onComplete={() => {
+                    // Update lastStudied for all notes in the folder
+                    (activeNote ? [activeNote] : folderNotes).forEach(n => updateStudyStats(n.id, "flashcards"));
+                  }}
+                />
               </TabsContent>
 
               <TabsContent value="quiz" className="flex-1 p-0 m-0 h-full overflow-hidden">
                 <QuizView
                   note={activeNote}
-                  onComplete={(noteId: string, score: number, total: number) => {
-                    // Update stats in a single operation
-                    updateStudyStats(noteId, "quiz", true, score, total);
+                  notes={!activeNote ? folderNotes : undefined}
+                  folderName={folders.find((f) => f.id === activeFolder)?.name || "Study"}
+                  onComplete={() => {
+                    // Update lastStudied for all notes in the folder
+                    (activeNote ? [activeNote] : folderNotes).forEach(n => updateStudyStats(n.id, "quiz"));
                   }}
                 />
               </TabsContent>
@@ -828,7 +853,10 @@ export default function NoteApp() {
           <FlashcardView
             notes={folderNotes}
             folderName={folders.find((f) => f.id === activeFolder)?.name || "Study"}
-            onComplete={(noteId) => updateStudyStats(noteId, "flashcards")}
+            onComplete={() => {
+              // Update lastStudied for all notes in the folder
+              folderNotes.forEach(n => updateStudyStats(n.id, "flashcards"));
+            }}
           />
         )}
 
@@ -836,9 +864,9 @@ export default function NoteApp() {
           <QuizView
             notes={folderNotes}
             folderName={folders.find((f) => f.id === activeFolder)?.name || "Study"}
-            onComplete={(noteId: string, score: number, total: number) => {
-              // Update stats in a single operation
-              updateStudyStats(noteId, "quiz", true, score, total);
+            onComplete={() => {
+              // Update lastStudied for all notes in the folder
+              folderNotes.forEach(n => updateStudyStats(n.id, "quiz"));
             }}
           />
         )}

@@ -146,7 +146,7 @@ function generateTestQuestions(notes: Note[]): any[] {
     return true;
   });
   // Shuffle and limit to 10
-  return deduped.sort(() => Math.random() - 0.5).slice(0, 10);
+  return deduped.sort(() => Math.random() - 0.5);
 }
 
 // Helper to generate options for a question
