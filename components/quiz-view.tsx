@@ -11,6 +11,9 @@ import type { Note } from "@/components/note-app"
 import 'katex/dist/katex.min.css'
 import { InlineMath } from 'react-katex'
 import type { Block } from "@/lib/db"
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from '@dnd-kit/utilities';
 
 interface QuizViewProps {
   note?: Note
@@ -30,6 +33,22 @@ interface QuizQuestion {
   math?: boolean
 }
 
+// Extend QuizQuestion for sequence type
+interface SequenceQuizQuestion {
+  type: "sequence";
+  question: string;
+  sequence: string[]; // correct order
+  options: string[]; // shuffled order
+  noteId: string;
+  noteTitle: string;
+}
+
+// Update QuizQuestion to allow sequence type
+// @ts-ignore
+// eslint-disable-next-line
+// (for type safety, you may want to use a union type in a real refactor)
+type AnyQuizQuestion = QuizQuestion | SequenceQuizQuestion;
+
 // Helper to render text or math
 function renderMathOrText(block: any) {
   const text = block.question || block.answer || block.option || '';
@@ -41,8 +60,22 @@ function renderMathOrText(block: any) {
   return text;
 }
 
+// Helper to recursively collect all linked WHAT blocks in order
+function getAllLinkedWhatBlocks(whoBlock: Block, allBlocks: Block[]): Block[] {
+  const result: Block[] = [];
+  let currentIds = whoBlock.linkedBlockIds ? [...whoBlock.linkedBlockIds] : [];
+  while (currentIds.length > 0) {
+    const nextId = currentIds[0];
+    const nextBlock = allBlocks.find(b => b.id === nextId && b.type === "what");
+    if (!nextBlock) break;
+    result.push(nextBlock);
+    currentIds = nextBlock.linkedBlockIds ? [...nextBlock.linkedBlockIds] : [];
+  }
+  return result;
+}
+
 export default function QuizView({ note, notes, folderName, onComplete }: QuizViewProps) {
-  const [questions, setQuestions] = useState<QuizQuestion[]>([])
+  const [questions, setQuestions] = useState<AnyQuizQuestion[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
   const [isAnswered, setIsAnswered] = useState(false)
@@ -51,6 +84,10 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
   const [isGroupMode, setIsGroupMode] = useState(false)
   const [progress, setProgress] = useState(0)
   const [shouldInitialize, setShouldInitialize] = useState(true)
+  const [sequenceOrder, setSequenceOrder] = useState<string[]>([]); // for sequence mode
+  const [wasSequenceCorrect, setWasSequenceCorrect] = useState<boolean | null>(null); // for sequence mode feedback
+  const [userSequenceOrder, setUserSequenceOrder] = useState<string[]>([]); // stores user's submitted order
+  const [showUserSequence, setShowUserSequence] = useState(false); // toggles between correct/user sequence
 
   useEffect(() => {
     // Only initialize quiz if we should
@@ -61,7 +98,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     console.log(`Quiz view - Group mode: ${isGroupMode}, Notes count: ${notes?.length || 0}`)
 
     // Generate quiz questions from who/what blocks
-    const quizQuestions: QuizQuestion[] = []
+    const quizQuestions: AnyQuizQuestion[] = []
 
     // Collect all unique 'what' blocks from the provided notes (for regular questions only)
     let whatBlocks: string[] = []
@@ -96,20 +133,23 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     // Remove duplicates
     whatBlocks = Array.from(new Set(whatBlocks))
 
-    // If there are fewer than 4 unique regular what blocks and no true/false questions, do not start the quiz
-    if (whatBlocks.length < 4 && !hasTrueFalseQuestions) {
-      setQuestions([])
-      setCurrentIndex(0)
-      setSelectedAnswer(null)
-      setIsAnswered(false)
-      setScore(0)
-      setQuizCompleted(false)
-      setProgress(0)
-      return
-    }
-
     function addQuizQuestionsFromBlocks(blocks: Block[], noteId: string, noteTitle: string, noteObj: Note) {
       blocks.forEach((block) => {
+        // Sequence mode: who with 2+ linked what blocks (chain-aware)
+        if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) {
+          const whatBlocks = getAllLinkedWhatBlocks(block, blocks);
+          if (whatBlocks.length >= 2) {
+            quizQuestions.push({
+              type: "sequence",
+              question: block.content,
+              sequence: whatBlocks.map(b => b.content),
+              options: [...whatBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
+              noteId,
+              noteTitle,
+            });
+            return; // Do not create multiple choice for this who block
+          }
+        }
         // True/False questions: only WHO as question, WHAT as statement, user picks True/False
         if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
           const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
@@ -209,6 +249,17 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     }
 
     console.log(`Generated ${quizQuestions.length} quiz questions`)
+    // If there are no quiz questions, do not start the quiz
+    if (quizQuestions.length === 0) {
+      setQuestions([])
+      setCurrentIndex(0)
+      setSelectedAnswer(null)
+      setIsAnswered(false)
+      setScore(0)
+      setQuizCompleted(false)
+      setProgress(0)
+      return
+    }
     // Shuffle the questions
     const shuffled = [...quizQuestions].sort(() => Math.random() - 0.5)
     setQuestions(shuffled.slice(0, 10)) // Limit to 10 questions
@@ -230,18 +281,22 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
 
   const generateOptions = (correctAnswer: string, notesList: Note[], blockType: "who" | "what"): string[] => {
     // Get all possible answers from the notes
-    const allAnswers: string[] = []
+    const allAnswers: string[] = [];
     notesList.forEach((noteItem) => {
       noteItem.blocks
         .filter((block) => block.type === blockType)
         .forEach((block) => {
           // Exclude WHAT blocks with a truthState from being used as options
           if (blockType === "what" && (block as any).truthState) return;
+          // Exclude sequence-based WHAT blocks (those with linkedBlockIds)
+          if (blockType === "what" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) return;
           // Exclude WHO blocks linked to a WHAT block with a truthState
           if (blockType === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
             const whatBlock = noteItem.blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
             if (whatBlock && whatBlock.truthState) return;
           }
+          // Exclude WHO blocks that are sequence-based (2+ linked WHATs)
+          if (blockType === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length >= 2) return;
           if (block.content !== correctAnswer) {
             allAnswers.push(block.content)
           }
@@ -258,11 +313,12 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
   }
 
   const checkAnswer = () => {
-    if (!selectedAnswer) return
-
-    setIsAnswered(true)
-    if (selectedAnswer === questions[currentIndex].answer) {
-      setScore(score + 1)
+    if (!selectedAnswer) return;
+    setIsAnswered(true);
+    // Only check answer for multiple choice questions
+    const q = questions[currentIndex];
+    if ('answer' in q && typeof q.answer === 'string' && selectedAnswer === q.answer) {
+      setScore(score + 1);
     }
   }
 
@@ -291,6 +347,62 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
 
     // Reshuffle the questions
     setQuestions([...questions].sort(() => Math.random() - 0.5))
+  }
+
+  // When a sequence question is shown, initialize sequenceOrder and reset wasSequenceCorrect
+  useEffect(() => {
+    if (questions.length > 0 && questions[currentIndex] && (questions[currentIndex] as any).type === "sequence") {
+      setSequenceOrder((questions[currentIndex] as SequenceQuizQuestion).options);
+      setIsAnswered(false);
+      setWasSequenceCorrect(null);
+      setUserSequenceOrder([]);
+      setShowUserSequence(false);
+    }
+    // eslint-disable-next-line
+  }, [currentIndex, questions]);
+
+  // Sequence drag-and-drop handlers
+  function handleDragEnd(event: any) {
+    const { active, over } = event;
+    if (active.id !== over.id) {
+      const oldIndex = sequenceOrder.indexOf(active.id);
+      const newIndex = sequenceOrder.indexOf(over.id);
+      setSequenceOrder(arrayMove(sequenceOrder, oldIndex, newIndex));
+    }
+  }
+
+  // Sequence Sortable Item
+  function SortableItem({ id, disabled }: { id: string, disabled: boolean }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+      cursor: disabled ? 'default' : 'grab',
+    };
+    // Find the block for this id (for image support)
+    const block = questions[currentIndex] && 'type' in questions[currentIndex] && questions[currentIndex].type === 'sequence'
+      ? (note ? note.blocks : (notes ? notes.flatMap(n => n.blocks) : [])).find((b: any) => b.content === id)
+      : null;
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        className={`flex flex-col items-center rounded-lg border p-3 bg-white dark:bg-gray-800 mb-2 ${disabled ? 'opacity-60' : ''}`}
+      >
+        {block && block.image && (
+          <img
+            src={block.image}
+            alt="Option"
+            className="max-h-64 max-w-md rounded-md mb-2 object-contain"
+            style={{ display: 'block', margin: '0 auto' }}
+          />
+        )}
+        <span className="text-lg font-medium text-center">{id}</span>
+      </div>
+    );
   }
 
   if (questions.length === 0) {
@@ -347,7 +459,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center flex-1 p-4">
-          <div className="w-full max-w-xl">
+          <div className="w-full max-w-2xl">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm">
                 Question {currentIndex + 1} of {questions.length}
@@ -358,83 +470,175 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
             </div>
             <Progress value={progress} className="h-2 w-full mb-4" />
 
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6">
-              <div className="flex justify-between items-start mb-4">
-                <h2 className="text-xl font-bold">{renderMathOrText(questions[currentIndex])}</h2>
-                {isGroupMode && (
-                  <Badge variant="outline" className="ml-2">
-                    {questions[currentIndex].noteTitle}
-                  </Badge>
-                )}
-              </div>
-
-              {questions[currentIndex].questionImage && (
-                <div className="mb-4 flex justify-center">
-                  <img
-                    src={questions[currentIndex].questionImage}
-                    alt="Question"
-                    className="max-h-48 rounded-md"
-                  />
+            {/* Sequence Mode UI */}
+            {('type' in questions[currentIndex]) && questions[currentIndex].type === "sequence" ? (
+              <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6 max-w-7xl mx-auto flex flex-col" style={{ height: '500px' }}>
+                <div className="flex justify-between items-start mb-4">
+                  <h2 className="text-xl font-bold">{(questions[currentIndex] as SequenceQuizQuestion).question}</h2>
+                  {isGroupMode && (
+                    <Badge variant="outline" className="ml-2">
+                      {questions[currentIndex].noteTitle}
+                    </Badge>
+                  )}
                 </div>
-              )}
-
-              <RadioGroup value={selectedAnswer || ""} onValueChange={handleAnswerSelect} className="space-y-3">
-                {questions[currentIndex].options.map((option, index) => (
-                  <div
-                    key={index}
-                    className={`flex items-center space-x-2 rounded-lg border p-3 ${isAnswered
-                      ? option === questions[currentIndex].answer
-                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                        : option === selectedAnswer
-                          ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                          : ""
-                      : ""
-                      }`}
-                  >
-                    <RadioGroupItem value={option} id={`option-${index}`} disabled={isAnswered} />
-                    <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer">
-                      {option.startsWith('data:image') ? (
-                        <img
-                          src={option}
-                          alt="Option"
-                          className="max-h-16 rounded-md"
-                        />
-                      ) : (
-                        renderMathOrText({ option, math: questions[currentIndex].math })
-                      )}
-                    </Label>
-                    {isAnswered && option === questions[currentIndex].answer && (
-                      <Check className="w-5 h-5 text-green-500" />
-                    )}
-                    {isAnswered && option === selectedAnswer && option !== questions[currentIndex].answer && (
-                      <X className="w-5 h-5 text-red-500" />
+                {/* Only use DnD when answering */}
+                {!isAnswered ? (
+                  <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <div style={{ maxHeight: '100%', overflowY: 'auto', width: '100%', margin: '0 auto', padding: '0 20px' }} className="flex-1 min-h-0">
+                      <SortableContext items={sequenceOrder} strategy={verticalListSortingStrategy}>
+                        {sequenceOrder.map((id: string, idx: number) => (
+                          <div className="relative" key={id}>
+                            <SortableItem id={id} disabled={isAnswered} />
+                          </div>
+                        ))}
+                      </SortableContext>
+                    </div>
+                  </DndContext>
+                ) : (
+                  <div style={{ maxHeight: '100%', overflowY: 'auto', width: '100%', margin: '0 auto', padding: '0 20px' }} className="flex-1 min-h-0">
+                    {(isAnswered && !wasSequenceCorrect) ? (
+                      (showUserSequence ? userSequenceOrder : (questions[currentIndex] as SequenceQuizQuestion).sequence).map((id: string, idx: number) => (
+                        <div className="relative cursor-pointer select-none" key={id} onClick={() => setShowUserSequence(s => !s)}>
+                          <div className="flex flex-col items-center rounded-lg border p-3 bg-white dark:bg-gray-800 mb-2 w-full">
+                            <span className="text-lg font-medium text-center">{id}</span>
+                          </div>
+                          {showUserSequence
+                            ? <span className="absolute right-2 top-1/2 -translate-y-1/2 text-red-600"><X className="w-5 h-5" /></span>
+                            : <span className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600"><Check className="w-5 h-5" /></span>
+                          }
+                        </div>
+                      ))
+                    ) : (
+                      sequenceOrder.map((id: string, idx: number) => (
+                        <div className="relative select-none" key={id}>
+                          <div className="flex flex-col items-center rounded-lg border p-3 bg-white dark:bg-gray-800 mb-2 w-full">
+                            <span className="text-lg font-medium text-center">{id}</span>
+                          </div>
+                          {isAnswered && wasSequenceCorrect && (
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-green-600">
+                              <Check className="w-5 h-5" />
+                            </span>
+                          )}
+                        </div>
+                      ))
                     )}
                   </div>
-                ))}
-              </RadioGroup>
-
-              {isAnswered && questions[currentIndex].answerImage && (
-                <div className="mt-4 flex justify-center">
-                  <img
-                    src={questions[currentIndex].answerImage}
-                    alt="Answer"
-                    className="max-h-48 rounded-md"
-                  />
+                )}
+                <div className="flex justify-center gap-4 mt-6">
+                  {!isAnswered ? (
+                    <Button onClick={() => {
+                      setUserSequenceOrder(sequenceOrder); // store user's submitted order BEFORE rearranging
+                      setIsAnswered(true);
+                      const correct = JSON.stringify(sequenceOrder) === JSON.stringify((questions[currentIndex] as SequenceQuizQuestion).sequence);
+                      setWasSequenceCorrect(correct);
+                      if (correct) {
+                        setScore(score + 1);
+                      } else {
+                        // Rearrange the drag-and-drop items to the correct sequence
+                        setSequenceOrder((questions[currentIndex] as SequenceQuizQuestion).sequence);
+                        setShowUserSequence(false); // always show correct sequence first
+                      }
+                    }}>
+                      Submit Order
+                    </Button>
+                  ) : (
+                    <Button onClick={goToNextQuestion}>
+                      {currentIndex < questions.length - 1 ? "Next Question" : "See Results"}
+                    </Button>
+                  )}
                 </div>
-              )}
-            </div>
+                {/* Feedback at the bottom */}
+                {isAnswered && (
+                  <div className="mt-4 text-center">
+                    {wasSequenceCorrect
+                      ? <span className="text-green-600 font-bold">Correct!</span>
+                      : <span className="text-red-600 font-bold">Incorrect</span>
+                    }
+                  </div>
+                )}
+              </div>
+            ) : (
+              // Only render multiple choice UI if this is a QuizQuestion
+              ('answer' in questions[currentIndex]) && (
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6 max-w-7xl mx-auto">
+                  <div className="flex justify-between items-start mb-4">
+                    <h2 className="text-xl font-bold">{renderMathOrText(questions[currentIndex])}</h2>
+                    {isGroupMode && (
+                      <Badge variant="outline" className="ml-2">
+                        {questions[currentIndex].noteTitle}
+                      </Badge>
+                    )}
+                  </div>
+                  {'questionImage' in questions[currentIndex] && questions[currentIndex].questionImage && (
+                    <div className="mb-4 flex justify-center">
+                      <img
+                        src={questions[currentIndex].questionImage}
+                        alt="Question"
+                        className="max-h-48 rounded-md"
+                      />
+                    </div>
+                  )}
+                  <RadioGroup value={selectedAnswer || ""} onValueChange={handleAnswerSelect} className="space-y-3">
+                    {questions[currentIndex].options.map((option, index) => (
+                      <div
+                        key={index}
+                        className={`flex items-center space-x-2 rounded-lg border p-3 ${isAnswered
+                          ? option === (questions[currentIndex] as QuizQuestion).answer
+                            ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                            : option === selectedAnswer
+                              ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                              : ""
+                          : ""
+                          }`}
+                      >
+                        <RadioGroupItem value={option} id={`option-${index}`} disabled={isAnswered} />
+                        <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer">
+                          {option.startsWith('data:image') ? (
+                            <img
+                              src={option}
+                              alt="Option"
+                              className="max-h-16 rounded-md"
+                            />
+                          ) : (
+                            renderMathOrText({ option, math: 'math' in questions[currentIndex] ? questions[currentIndex].math : false })
+                          )}
+                        </Label>
+                        {isAnswered && option === (questions[currentIndex] as QuizQuestion).answer && (
+                          <Check className="w-5 h-5 text-green-500" />
+                        )}
+                        {isAnswered && option === selectedAnswer && option !== (questions[currentIndex] as QuizQuestion).answer && (
+                          <X className="w-5 h-5 text-red-500" />
+                        )}
+                      </div>
+                    ))}
+                  </RadioGroup>
+                  {'answerImage' in questions[currentIndex] && isAnswered && questions[currentIndex].answerImage && (
+                    <div className="mt-4 flex justify-center">
+                      <img
+                        src={questions[currentIndex].answerImage}
+                        alt="Answer"
+                        className="max-h-48 rounded-md"
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            )}
 
-            <div className="flex justify-center gap-4">
-              {!isAnswered ? (
-                <Button onClick={checkAnswer} disabled={!selectedAnswer}>
-                  Check Answer
-                </Button>
-              ) : (
-                <Button onClick={goToNextQuestion}>
-                  {currentIndex < questions.length - 1 ? "Next Question" : "See Results"}
-                </Button>
-              )}
-            </div>
+            {/* Conditionally render the bottom navigation button only for non-sequence questions */}
+            {!(('type' in questions[currentIndex]) && questions[currentIndex].type === "sequence") && (
+              <div className="flex justify-center gap-4">
+                {!isAnswered ? (
+                  <Button onClick={checkAnswer} disabled={!selectedAnswer}>
+                    Check Answer
+                  </Button>
+                ) : (
+                  <Button onClick={goToNextQuestion}>
+                    {currentIndex < questions.length - 1 ? "Next Question" : "See Results"}
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -58,10 +58,13 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
       blocks.forEach((block) => {
         // Handle both old and new data structures
         if (block.type === "who") {
+          // Exclude sequence-based WHO blocks (2+ linked WHATs)
+          if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length >= 2) return;
           // New structure: Check for linkedBlockIds array
           if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
             const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
-            if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "") {
+            // Exclude WHAT blocks that are part of a sequence (have linkedBlockIds)
+            if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "" && (!Array.isArray(whatBlock.linkedBlockIds) || whatBlock.linkedBlockIds.length === 0)) {
               cards.push({
                 front: block.content,
                 back: whatBlock.content,
@@ -79,7 +82,8 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
             const blockIndex = blocks.findIndex(b => b.id === block.id)
             if (blockIndex !== -1 && blockIndex < blocks.length - 1) {
               const nextBlock = blocks[blockIndex + 1]
-              if (nextBlock.type === "what" && nextBlock.content && nextBlock.content.trim() !== "") {
+              // Exclude WHAT blocks that are part of a sequence (have linkedBlockIds)
+              if (nextBlock.type === "what" && nextBlock.content && nextBlock.content.trim() !== "" && (!Array.isArray(nextBlock.linkedBlockIds) || nextBlock.linkedBlockIds.length === 0)) {
                 cards.push({
                   front: block.content,
                   back: nextBlock.content,

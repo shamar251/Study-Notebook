@@ -8,6 +8,10 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { DndContext, closestCenter } from "@dnd-kit/core";
+import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { CSS } from '@dnd-kit/utilities';
+import { SequenceQuestion } from './SequenceQuestion';
 
 // Helper: durations in minutes
 const DURATIONS = [15, 30, 60];
@@ -77,8 +81,36 @@ function generateOptions(correctAnswer: string, notesList: Note[], blockType: "w
 // Helper to generate test questions (copied from quiz-view)
 function generateTestQuestions(notes: Note[]): any[] {
   const quizQuestions: any[] = [];
+  function getAllLinkedWhatBlocks(whoBlock: Block, allBlocks: Block[]): Block[] {
+    const result: Block[] = [];
+    let currentIds = whoBlock.linkedBlockIds ? [...whoBlock.linkedBlockIds] : [];
+    while (currentIds.length > 0) {
+      const nextId = currentIds[0];
+      const nextBlock = allBlocks.find(b => b.id === nextId && b.type === "what");
+      if (!nextBlock) break;
+      result.push(nextBlock);
+      currentIds = nextBlock.linkedBlockIds ? [...nextBlock.linkedBlockIds] : [];
+    }
+    return result;
+  }
   function addQuizQuestionsFromBlocks(blocks: Block[], noteId: string, noteTitle: string, noteObj: Note) {
     blocks.forEach((block) => {
+      // Sequence mode: who with 2+ linked what blocks (chain-aware)
+      if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) {
+        const whatBlocks = getAllLinkedWhatBlocks(block, blocks);
+        if (whatBlocks.length >= 2) {
+          quizQuestions.push({
+            id: block.id + "-sequence",
+            type: "sequence",
+            question: block.content,
+            sequence: whatBlocks.map(b => b.content),
+            options: [...whatBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
+            noteId,
+            noteTitle,
+          });
+          return; // Do not create regular MCQs for this who block
+        }
+      }
       // True/False questions: use WHAT block as the statement, answer is its truthState
       if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
         const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
@@ -177,6 +209,13 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
   const [allNotes, setAllNotes] = useState<NoteOption[]>([]);
   const [previousScore, setPreviousScore] = useState<number | null>(null);
   const [previousSession, setPreviousSession] = useState<any>(null);
+  // Add state for sequence questions
+  const [sequenceOrder, setSequenceOrder] = useState<string[]>([]);
+  const [isSequenceAnswered, setIsSequenceAnswered] = useState(false);
+  const [wasSequenceCorrect, setWasSequenceCorrect] = useState<boolean | null>(null);
+  const [userSequenceOrder, setUserSequenceOrder] = useState<string[]>([]);
+  const [showUserSequence, setShowUserSequence] = useState(false);
+  const [allBlocksFromNotes, setAllBlocksFromNotes] = useState<Block[]>([]);
 
   // Load all notes for selection if not provided
   useEffect(() => {
@@ -246,16 +285,23 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     const noteMap = new Map<string, Note>();
     notes.forEach(n => noteMap.set(n.id, n));
     const uniqueNotes = Array.from(noteMap.values());
+    const allBlocksFromNotes = uniqueNotes.flatMap(n => n.blocks);
     // Generate questions using quizview logic
     let testQuestions = generateTestQuestions(uniqueNotes);
-    // For each question, generate options
-    testQuestions = testQuestions.map(q => ({
-      ...q,
-      options: q.type === "true/false"
-        ? ["True", "False"].sort(() => Math.random() - 0.5)
-        : generateOptions(q.answer, uniqueNotes, "what"),
-    }));
+    // For each question, generate options - but preserve sequence question options
+    testQuestions = testQuestions.map(q => {
+      if (q.type === "sequence") {
+        // Keep the original shuffled sequence options
+        return q;
+      }
+      if (q.type === "true/false") {
+        return { ...q, options: ["True", "False"].sort(() => Math.random() - 0.5) };
+      }
+      // For regular MCQs, generate options
+      return { ...q, options: generateOptions(q.answer, uniqueNotes, "what") };
+    });
     setQuestions(testQuestions);
+    setAllBlocksFromNotes(allBlocksFromNotes);
   }
 
   // Step 3: Timer logic
@@ -300,7 +346,11 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     const graded = questions.map(q => {
       let isCorrect = false;
       const userAnswer = answers[q.id] || "";
-      isCorrect = userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+      if (q.type === "sequence") {
+        isCorrect = Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence);
+      } else {
+        isCorrect = typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+      }
       if (isCorrect) correct++;
       return {
         blockId: q.id,
@@ -343,6 +393,47 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     }
     // eslint-disable-next-line
   }, [step]);
+
+  useEffect(() => {
+    if (step === "test" && questions.length > 0 && questions[currentIdx]?.type === "sequence") {
+      setSequenceOrder(questions[currentIdx].options);
+      setIsSequenceAnswered(false);
+      setWasSequenceCorrect(null);
+      setUserSequenceOrder([]);
+      setShowUserSequence(false);
+    }
+    // eslint-disable-next-line
+  }, [currentIdx, step, questions]);
+
+  function handleSequenceDragEnd(event: any) {
+    const { active, over } = event;
+    if (active.id !== over.id) {
+      const oldIndex = sequenceOrder.indexOf(active.id);
+      const newIndex = sequenceOrder.indexOf(over.id);
+      setSequenceOrder(arrayMove(sequenceOrder, oldIndex, newIndex));
+    }
+  }
+
+  function SequenceSortableItem({ id, disabled }: { id: string, disabled: boolean }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+    const style = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.5 : 1,
+      cursor: disabled ? 'default' : 'grab',
+    };
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        className={`flex flex-col items-center rounded-lg border p-3 bg-white dark:bg-gray-800 mb-2 ${disabled ? 'opacity-60' : ''}`}
+      >
+        <span className="text-lg font-medium text-center">{id}</span>
+      </div>
+    );
+  }
 
   // Step 8: UI
   if (step === "setup") {
@@ -453,6 +544,54 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     const q = questions[currentIdx];
     const progress = questions.length > 0 ? Math.round(((currentIdx) / questions.length) * 100) : 0;
     const options = q.options;
+    // Before rendering SequenceQuestion:
+    const allBlocks = questions.length > 0 ? questions.flatMap(qi => qi.blocks) : q ? q.blocks : [];
+    // Sequence question UI
+    if (q.type === "sequence") {
+      return (
+        <div className="flex flex-col md:flex-row h-full w-full max-w-5xl mx-auto mt-2">
+          <div className="flex-1 flex flex-col items-center">
+            <div className="w-full px-2 md:px-0">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-lg font-bold">Test Mode</div>
+                <div className="text-sm text-gray-500">Time Left: <b>{Math.floor(timer / 60)}:{(timer % 60).toString().padStart(2, "0")}</b></div>
+              </div>
+              <Progress value={progress} className="h-2 w-full mb-4" />
+            </div>
+            <SequenceQuestion
+              question={q}
+              blocks={allBlocksFromNotes}
+              initialOrder={answers[q.id] || q.options}
+              onOrderChange={order => setAnswers(a => ({ ...a, [q.id]: order }))}
+              advanceOnSubmit={true}
+              showNavigation={true}
+              onPrev={handlePrev}
+              onNext={handleNext}
+              onFinalSubmit={handleSubmit}
+              isFirst={currentIdx === 0}
+              isLast={currentIdx === questions.length - 1}
+            />
+          </div>
+          {/* Sidebar: question progress */}
+          <div className="w-full md:w-64 flex-shrink-0 mt-6 mr-4 md:mt-0 md:ml-8">
+            <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4 flex flex-col items-center">
+              <div className="text-lg font-semibold mb-2">Progress</div>
+              <div className="grid grid-cols-5 gap-2">
+                {questions.map((_, idx) => (
+                  <button
+                    key={idx}
+                    className={`w-8 h-8 rounded-full flex items-center justify-center border text-sm font-bold transition-all ${idx === currentIdx ? "bg-blue-500 text-white border-blue-500" : "bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-700"}`}
+                    onClick={() => setCurrentIdx(idx)}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col md:flex-row h-full w-full max-w-5xl mx-auto mt-8">
         {/* Main test area */}
@@ -523,7 +662,11 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
   if (step === "summary") {
     const correct = questions.filter((q, i) => {
       const userAnswer = answers[q.id] || "";
-      return userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+      if (q.type === "sequence") {
+        return Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence);
+      } else {
+        return typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+      }
     }).length;
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-6">
@@ -537,7 +680,9 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
             <ul className="space-y-2">
               {questions.map((q, i) => {
                 const userAnswer = answers[q.id] || "";
-                const isCorrect = userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+                const isCorrect = q.type === "sequence"
+                  ? Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence)
+                  : typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
                 return (
                   <li key={q.id} className={`border rounded p-3 flex items-center gap-3 ${isCorrect ? "border-green-400 bg-green-50 dark:bg-green-900/10" : "border-red-400 bg-red-50 dark:bg-red-900/10"}`}>
                     <span className="font-bold">Q{i + 1}.</span>

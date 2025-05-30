@@ -142,6 +142,20 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
     return count;
   }
 
+  // Count all study pairs in a folder, including nested folders and notes
+  const countStudyPairsInFolder = (folderId: string): number => {
+    // Get all descendant folder IDs
+    const getAllDescendantFolderIds = (id: string): string[] => {
+      const directChildren = folders.filter(f => f.parentId === id).map(f => f.id)
+      return directChildren.concat(directChildren.flatMap(getAllDescendantFolderIds))
+    }
+    const allFolderIds = [folderId, ...getAllDescendantFolderIds(folderId)]
+    // Get all notes in these folders
+    const notesInFolders = notes.filter(note => allFolderIds.includes(note.folderId))
+    // Sum up all study pairs in these notes
+    return notesInFolders.reduce((total, note) => total + countStudyPairs(note), 0)
+  }
+
   // Combine notes and folders into a single array for recent items
   const recentItems = [
     ...notes.map(note => ({
@@ -297,15 +311,44 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                             return d.getTime();
                           })
                       );
-                      let streak = 0;
-                      if (days.size > 0) {
-                        let today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        while (days.has(today.getTime())) {
+
+                      // Sort days in descending order
+                      const sortedDays = Array.from(days).sort((a, b) => b - a);
+
+                      if (sortedDays.length === 0) return 0;
+
+                      let streak = 1; // Start with 1 for today/yesterday
+                      const today = new Date();
+                      today.setHours(0, 0, 0, 0);
+                      const yesterday = new Date(today);
+                      yesterday.setDate(yesterday.getDate() - 1);
+
+                      // If there's no activity today or yesterday, streak is 0
+                      if (!days.has(today.getTime()) && !days.has(yesterday.getTime())) {
+                        return 0;
+                      }
+
+                      // Start from the most recent day
+                      let currentDay = new Date(sortedDays[0]);
+                      currentDay.setHours(0, 0, 0, 0);
+
+                      // Check consecutive days
+                      for (let i = 1; i < sortedDays.length; i++) {
+                        const previousDay = new Date(sortedDays[i]);
+                        previousDay.setHours(0, 0, 0, 0);
+
+                        // Calculate difference in days
+                        const diffTime = Math.abs(currentDay.getTime() - previousDay.getTime());
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                        if (diffDays === 1) {
                           streak++;
-                          today.setDate(today.getDate() - 1);
+                          currentDay = previousDay;
+                        } else {
+                          break; // Streak broken
                         }
                       }
+
                       return streak;
                     })()}</div>
                     <div className="text-sm text-gray-500 mt-1 ">days</div>
@@ -323,15 +366,44 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                           return d.getTime();
                         })
                     );
-                    let streak = 0;
-                    if (days.size > 0) {
-                      let today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      while (days.has(today.getTime())) {
+
+                    // Sort days in descending order
+                    const sortedDays = Array.from(days).sort((a, b) => b - a);
+
+                    if (sortedDays.length === 0) return 'Start studying to build your streak!';
+
+                    let streak = 1; // Start with 1 for today/yesterday
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const yesterday = new Date(today);
+                    yesterday.setDate(yesterday.getDate() - 1);
+
+                    // If there's no activity today or yesterday, streak is 0
+                    if (!days.has(today.getTime()) && !days.has(yesterday.getTime())) {
+                      return 'Start studying to build your streak!';
+                    }
+
+                    // Start from the most recent day
+                    let currentDay = new Date(sortedDays[0]);
+                    currentDay.setHours(0, 0, 0, 0);
+
+                    // Check consecutive days
+                    for (let i = 1; i < sortedDays.length; i++) {
+                      const previousDay = new Date(sortedDays[i]);
+                      previousDay.setHours(0, 0, 0, 0);
+
+                      // Calculate difference in days
+                      const diffTime = Math.abs(currentDay.getTime() - previousDay.getTime());
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                      if (diffDays === 1) {
                         streak++;
-                        today.setDate(today.getDate() - 1);
+                        currentDay = previousDay;
+                      } else {
+                        break; // Streak broken
                       }
                     }
+
                     return streak > 0 ? `You've studied ${streak} days in a row!` : 'Start studying to build your streak!';
                   })()}
                 </div>
@@ -478,7 +550,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                       <CardContent className="pb-2">
                         <div className="flex items-center gap-2 mb-2">
                           <a href="#" className="text-xs text-blue-600 dark:text-blue-400 flex items-center hover:underline">
-                            <span className="font-medium mr-1">{notes.filter((note: any) => note.folderId === item.id).reduce((total: number, note: any) => total + countStudyPairs(note), 0)}</span> study items
+                            <span className="font-medium mr-1">{countStudyPairsInFolder(item.id)}</span> study items
                           </a>
                         </div>
                       </CardContent>
@@ -531,7 +603,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                       <div className="grid grid-cols-3 gap-4 mb-3">
                         <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
                           <div className="text-xs text-gray-500 mb-1">Flashcards</div>
-                          <div className="text-lg font-bold">-</div>
+                          <div className="text-lg font-bold">{countStudyPairsInFolder(folder.id)}</div>
                         </div>
                         <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
                           <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
@@ -577,7 +649,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                     <div className="grid grid-cols-3 gap-4 mb-3">
                       <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
                         <div className="text-xs text-gray-500 mb-1">Flashcards</div>
-                        <div className="text-lg font-bold">{note.studyStats?.flashcardReviews || 0}</div>
+                        <div className="text-lg font-bold">{countStudyPairs(note)}</div>
                       </div>
                       <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
                         <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
