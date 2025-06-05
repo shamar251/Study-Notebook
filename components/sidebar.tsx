@@ -250,9 +250,9 @@ export default function Sidebar({
     return directNotes + childNotes
   }
 
-  // Check if folder can be deleted (only prevent if it has subfolders)
+  // Check if folder can be deleted (remove all restrictions, always return true)
   const canDeleteFolder = (folderId: string): boolean => {
-    return !folders.some((folder) => folder.parentId === folderId)
+    return true;
   }
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -411,13 +411,11 @@ export default function Sidebar({
                 </ContextMenuItem>
                 <ContextMenuItem
                   onClick={() => {
-                    if (canDeleteFolder(folder.id)) {
-                      setFolderToDelete(folder)
-                      setDeleteDialogOpen(true)
-                    }
+                    setFolderToDelete(folder)
+                    setDeleteDialogOpen(true)
                   }}
-                  disabled={!canDeleteFolder(folder.id)}
-                  className={!canDeleteFolder(folder.id) ? "text-muted-foreground" : "text-destructive"}
+                  disabled={false}
+                  className={"text-destructive"}
                 >
                   <Trash2 className="w-4 h-4 mr-2" /> Delete
                 </ContextMenuItem>
