@@ -70,11 +70,27 @@ export interface TestSession {
   score: number; // As a percentage or raw value
 }
 
+export interface QuizSession {
+  id: string;
+  folderId: string;
+  startTime: number;
+  endTime?: number;
+  duration: number;
+  score: number;
+  questions: {
+    blockId: string;
+    userAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+  }[];
+}
+
 export class StudyNotebookDB extends Dexie {
   notes!: Table<Note>;
   folders!: Table<Folder>;
   operations!: Table<Operation>;
   testSessions!: Table<TestSession>;
+  quizSessions!: Table<QuizSession>;
 
   constructor() {
     super('StudyNotebookDB');
@@ -112,6 +128,14 @@ export class StudyNotebookDB extends Dexie {
       folders: 'id, name, parentId, description, createdAt, order, path, deletedAt',
       operations: '++id, type, timestamp, data',
       testSessions: 'id, noteId, folderId, startTime'
+    });
+
+    this.version(7).stores({
+      notes: 'id, title, folderId, updatedAt, lastStudied, tags, order, deletedAt',
+      folders: 'id, name, parentId, description, createdAt, order, path, deletedAt',
+      operations: '++id, type, timestamp, data',
+      testSessions: 'id, noteId, folderId, startTime',
+      quizSessions: 'id, folderId, startTime'
     });
   }
 

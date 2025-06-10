@@ -703,6 +703,14 @@ export default function NoteApp() {
     setFolders(await db.folders.toArray());
   };
 
+  const handleEditFolderName = async (newName: string) => {
+    if (!activeFolder) return;
+    const folder = folders.find(f => f.id === activeFolder);
+    if (!folder) return;
+    await updateFolder({ ...folder, name: newName });
+    setFolders(prev => prev.map(f => f.id === activeFolder ? { ...f, name: newName } : f));
+  };
+
   return (
     <div className="flex h-screen overflow-hidden">
       <Sidebar
@@ -758,12 +766,23 @@ export default function NoteApp() {
               setShowStudyModeSelector(false)
               setShowDashboard(false)
             }}
+            onCreateSubfolder={() => createFolderHandler("New Subfolder", activeFolder)}
             folderNotes={folderNotes}
+            subfolders={folders.filter(f => f.parentId === activeFolder).map(f => ({ id: f.id, name: f.name, description: f.description }))}
+            onOpenSubfolder={(subfolderId) => {
+              setActiveFolder(subfolderId);
+              setActiveNote(null);
+              setShowStudyModeSelector(true);
+              setView(null);
+              setShowDashboard(false);
+            }}
             onEditDescription={(description) => {
               if (activeFolder) {
                 updateFolderDescriptionHandler(activeFolder, description)
               }
             }}
+            onEditName={handleEditFolderName}
+            onNoteClick={openNote}
           />
         )}
 

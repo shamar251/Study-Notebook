@@ -24,6 +24,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
   const [activeTab, setActiveTab] = useState("study")
   const [folderTestSessions, setFolderTestSessions] = useState<{ [folderId: string]: any }>({})
   const [noteTestSessions, setNoteTestSessions] = useState<{ [noteId: string]: any }>({})
+  const [folderQuizSessions, setFolderQuizSessions] = useState<{ [folderId: string]: any }>({})
 
   useEffect(() => {
     async function fetchTestSessions() {
@@ -47,6 +48,18 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
     }
     fetchTestSessions()
   }, [folders, notes])
+
+  useEffect(() => {
+    async function fetchQuizSessions() {
+      const quizSessions: { [folderId: string]: any } = {}
+      for (const folder of folders) {
+        const quizSession = await db.quizSessions.where("folderId").equals(folder.id).reverse().first()
+        if (quizSession) quizSessions[folder.id] = quizSession
+      }
+      setFolderQuizSessions(quizSessions)
+    }
+    fetchQuizSessions()
+  }, [folders])
 
   // Sort notes by last updated
   const recentNotes = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6)
@@ -174,15 +187,9 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
 
   return (
     <div className="flex-1 overflow-auto hide-scrollbar">
-      <div className="max-w-6xl mx-auto p-6">
+      <div className="w-full p-5">
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center">
-            {/* <HomeIcon className="w-7 h-7 mr-2 text-black" /> */}
-            <h1 className="text-2xl font-semibold">Dashboard</h1>
-          </div>
-          {/* <Button onClick={onCreateNote}>
-            <Plus className="w-4 h-4 mr-2" /> New Note
-          </Button> */}
+
         </div>
 
         {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -241,219 +248,6 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
           </Card>
         </div> */}
 
-        {/* 3-Card Dashboard Section with Framer Motion */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 overflow-visible">
-          {/* Card 1: Upcoming Reviews */}
-          <motion.div
-            whileHover={{ scale: 1.04, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            style={{ zIndex: 2, position: 'relative' }}
-          >
-            <Card className="h-full flex flex-col">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Calendar className="w-4 h-4" />
-                  Upcoming Reviews
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <ul className="text-sm text-gray-700 dark:text-gray-300">
-                  {notes
-                    .filter((note) => note.blocks && note.blocks.length > 0)
-                    .sort((a, b) => {
-                      if (!a.lastStudied) return -1;
-                      if (!b.lastStudied) return 1;
-                      return a.lastStudied - b.lastStudied;
-                    })
-                    .slice(0, 2)
-                    .map((note) => (
-                      <li key={note.id} className="mb-2 flex items-center justify-between">
-                        <span className="truncate max-w-[120px]">{note.title}</span>
-                        <span className="text-xs text-gray-500 ml-2">
-                          {note.lastStudied ? getTimeSince(note.lastStudied) : "Never"}
-                        </span>
-                      </li>
-                    ))}
-                  {notes.length === 0 && <li>No notes to review.</li>}
-                </ul>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Card 2: Study Streak */}
-          <motion.div
-            whileHover={{ scale: 1.04, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.1 }}
-            style={{ zIndex: 2, position: 'relative' }}
-          >
-            <Card className="h-full flex flex-col">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Flame className="w-5 h-5 text-black" />
-                  Study Streak
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-1 flex flex-col justify-between h-full">
-                <div className="flex justify-end">
-                  <div className="text-right">
-                    <div className="text-4xl font-extrabold text-black leading-none mr-1">{(() => {
-                      // Calculate streak: count consecutive days with at least one note studied
-                      const days = new Set(
-                        notes
-                          .filter((n) => n.lastStudied)
-                          .map((n) => {
-                            const d = new Date(n.lastStudied!);
-                            d.setHours(0, 0, 0, 0);
-                            return d.getTime();
-                          })
-                      );
-
-                      // Sort days in descending order
-                      const sortedDays = Array.from(days).sort((a, b) => b - a);
-
-                      if (sortedDays.length === 0) return 0;
-
-                      let streak = 1; // Start with 1 for today/yesterday
-                      const today = new Date();
-                      today.setHours(0, 0, 0, 0);
-                      const yesterday = new Date(today);
-                      yesterday.setDate(yesterday.getDate() - 1);
-
-                      // If there's no activity today or yesterday, streak is 0
-                      if (!days.has(today.getTime()) && !days.has(yesterday.getTime())) {
-                        return 0;
-                      }
-
-                      // Start from the most recent day
-                      let currentDay = new Date(sortedDays[0]);
-                      currentDay.setHours(0, 0, 0, 0);
-
-                      // Check consecutive days
-                      for (let i = 1; i < sortedDays.length; i++) {
-                        const previousDay = new Date(sortedDays[i]);
-                        previousDay.setHours(0, 0, 0, 0);
-
-                        // Calculate difference in days
-                        const diffTime = Math.abs(currentDay.getTime() - previousDay.getTime());
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                        if (diffDays === 1) {
-                          streak++;
-                          currentDay = previousDay;
-                        } else {
-                          break; // Streak broken
-                        }
-                      }
-
-                      return streak;
-                    })()}</div>
-                    <div className="text-sm text-gray-500 mt-1 ">days</div>
-                  </div>
-                </div>
-                <div className="text-xs text-gray-400 mt-2">
-                  {(() => {
-                    // Calculate streak again for the message
-                    const days = new Set(
-                      notes
-                        .filter((n) => n.lastStudied)
-                        .map((n) => {
-                          const d = new Date(n.lastStudied!);
-                          d.setHours(0, 0, 0, 0);
-                          return d.getTime();
-                        })
-                    );
-
-                    // Sort days in descending order
-                    const sortedDays = Array.from(days).sort((a, b) => b - a);
-
-                    if (sortedDays.length === 0) return 'Start studying to build your streak!';
-
-                    let streak = 1; // Start with 1 for today/yesterday
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0);
-                    const yesterday = new Date(today);
-                    yesterday.setDate(yesterday.getDate() - 1);
-
-                    // If there's no activity today or yesterday, streak is 0
-                    if (!days.has(today.getTime()) && !days.has(yesterday.getTime())) {
-                      return 'Start studying to build your streak!';
-                    }
-
-                    // Start from the most recent day
-                    let currentDay = new Date(sortedDays[0]);
-                    currentDay.setHours(0, 0, 0, 0);
-
-                    // Check consecutive days
-                    for (let i = 1; i < sortedDays.length; i++) {
-                      const previousDay = new Date(sortedDays[i]);
-                      previousDay.setHours(0, 0, 0, 0);
-
-                      // Calculate difference in days
-                      const diffTime = Math.abs(currentDay.getTime() - previousDay.getTime());
-                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-                      if (diffDays === 1) {
-                        streak++;
-                        currentDay = previousDay;
-                      } else {
-                        break; // Streak broken
-                      }
-                    }
-
-                    return streak > 0 ? `You've studied ${streak} days in a row!` : 'Start studying to build your streak!';
-                  })()}
-                </div>
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          {/* Card 3: Recent Test Scores */}
-          <motion.div
-            whileHover={{ scale: 1.04, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-            style={{ zIndex: 2, position: 'relative' }}
-          >
-            <Card className="h-full flex flex-col">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <GraduationCap className="w-4 h-4" />
-                  Recent Test Scores
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex-1">
-                <ul className="text-sm text-gray-700 dark:text-gray-300">
-                  {(() => {
-                    // Combine folder and note test sessions
-                    const allSessions = [
-                      ...Object.values(folderTestSessions).map((s: any) => ({ ...s, _type: 'folder' })),
-                      ...Object.values(noteTestSessions).map((s: any) => ({ ...s, _type: 'note' }))
-                    ]
-                      .sort((a, b) => (b.startTime || 0) - (a.startTime || 0))
-                      .slice(0, 3);
-                    if (allSessions.length === 0) return <li>No test scores yet.</li>;
-                    return allSessions.map((session: any) => (
-                      <li key={session.id} className="mb-2 flex items-center justify-between">
-                        <span className="truncate max-w-[120px]">
-                          {session._type === 'folder'
-                            ? getFolderName(session.folderId)
-                            : notes.find(n => n.id === session.noteId)?.title || 'Note'}
-                        </span>
-                        <span className="text-xs text-gray-500 ml-2">{session.score}%</span>
-                        <span className="text-xs text-gray-400 ml-2">{formatDate(session.startTime)}</span>
-                      </li>
-                    ));
-                  })()}
-                </ul>
-              </CardContent>
-            </Card>
-          </motion.div>
-        </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="mb-6">
@@ -607,7 +401,7 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                         </div>
                         <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
                           <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
-                          <div className="text-lg font-bold">-</div>
+                          <div className="text-lg font-bold">{folderQuizSessions[folder.id]?.score !== undefined ? `${folderQuizSessions[folder.id].score}%` : '-'}</div>
                         </div>
                         <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
                           <div className="text-xs text-gray-500 mb-1">Test Score</div>

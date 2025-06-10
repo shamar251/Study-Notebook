@@ -646,7 +646,7 @@ export default function Sidebar({
         />
 
         {/* Main sidebar */}
-        <div className="w-64 h-full border-r border-border bg-background flex flex-col relative" style={{ overflow: 'visible' }}>
+        <div className="w-64 h-full border-r rounded-lg border-border bg-background flex flex-col relative" style={{ overflow: 'visible' }}>
           {/* Header nav section */}
           <div className="flex items-center justify-between p-2 border-b border-border bg-background/95">
             <div className="flex gap-1">

@@ -14,6 +14,7 @@ import type { Block } from "@/lib/db"
 import { DndContext, closestCenter } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from '@dnd-kit/utilities';
+import { db } from "@/lib/db"
 
 interface QuizViewProps {
   note?: Note
@@ -88,10 +89,12 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
   const [wasSequenceCorrect, setWasSequenceCorrect] = useState<boolean | null>(null); // for sequence mode feedback
   const [userSequenceOrder, setUserSequenceOrder] = useState<string[]>([]); // stores user's submitted order
   const [showUserSequence, setShowUserSequence] = useState(false); // toggles between correct/user sequence
+  const [quizStartTime, setQuizStartTime] = useState(Date.now())
 
   useEffect(() => {
     // Only initialize quiz if we should
     if (!shouldInitialize) return;
+    setQuizStartTime(Date.now());
 
     // Determine if we're in group mode (studying a folder)
     setIsGroupMode(!!notes && notes.length > 0)
@@ -330,7 +333,10 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     } else {
       setQuizCompleted(true)
       if (onComplete) {
-        // In group mode, we'll just use the ID of the last question's note
+        if (notes && notes.length > 0 && folderName) {
+          // Save quiz session for folder
+          handleQuizComplete(notes[0].folderId, score, questions.length, questions);
+        }
         onComplete(questions[currentIndex].noteId, score, questions.length)
       }
     }
@@ -404,6 +410,23 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
       </div>
     );
   }
+
+  const handleQuizComplete = async (folderId: string, score: number, total: number, questions: AnyQuizQuestion[]) => {
+    await db.quizSessions.put({
+      id: `quiz-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      folderId,
+      startTime: quizStartTime,
+      endTime: Date.now(),
+      duration: Math.floor((Date.now() - quizStartTime) / 1000),
+      score: Math.round((score / total) * 100),
+      questions: questions.map(q => ({
+        blockId: 'blockId' in q ? (q as any).blockId || '' : '',
+        userAnswer: 'userAnswer' in q ? (q as any).userAnswer || '' : '',
+        correctAnswer: 'correctAnswer' in q ? (q as any).correctAnswer || '' : '',
+        isCorrect: 'isCorrect' in q ? (q as any).isCorrect || false : false,
+      })),
+    });
+  };
 
   if (questions.length === 0) {
     return (

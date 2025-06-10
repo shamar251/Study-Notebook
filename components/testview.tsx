@@ -541,6 +541,21 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
   }
 
   if (step === "test") {
+    if (questions.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] p-6">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-lg p-8 w-full max-w-2xl flex flex-col items-center">
+            <div className="mb-4 text-2xl font-bold text-red-600 flex items-center gap-2">
+              <X className="w-8 h-8" /> No study items available for testing
+            </div>
+            <div className="mb-2 text-lg text-gray-700 dark:text-gray-200 text-center">
+              There are no study items (WHO/WHAT pairs) available in the selected folder or note. Please add some study content and try again.
+            </div>
+            <Button className="mt-6" onClick={() => setStep("setup")}>Back</Button>
+          </div>
+        </div>
+      );
+    }
     const q = questions[currentIdx];
     const progress = questions.length > 0 ? Math.round(((currentIdx) / questions.length) * 100) : 0;
     const options = q.options;
@@ -576,7 +591,7 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
           <div className="w-full md:w-64 flex-shrink-0 mt-6 mr-4 md:mt-0 md:ml-8">
             <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4 flex flex-col items-center">
               <div className="text-lg font-semibold mb-2">Progress</div>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-5 gap-2 max-h-96 overflow-y-auto">
                 {questions.map((_, idx) => (
                   <button
                     key={idx}
@@ -641,7 +656,7 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
         <div className="w-full md:w-64 flex-shrink-0 mt-6 md:mt-0 md:ml-8">
           <div className="bg-white dark:bg-gray-900 rounded-lg shadow p-4 flex flex-col items-center">
             <div className="text-lg font-semibold mb-2">Progress</div>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-5 gap-2 max-h-96 overflow-y-auto">
               {questions.map((_, idx) => (
                 <button
                   key={idx}
