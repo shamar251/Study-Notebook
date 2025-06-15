@@ -24,13 +24,29 @@ interface EditorProps {
 function MathInput({ value, onChange, placeholder, isMathMode, onPaste, readOnly }: { value: string; onChange: (value: string) => void; placeholder: string; isMathMode?: boolean; onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void; readOnly?: boolean }) {
   const [isMathModeInternal, setIsMathModeInternal] = useState(isMathMode || false)
   const [mathError, setMathError] = useState<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const cursorPositionRef = useRef<number | null>(null)
 
   useEffect(() => {
     setIsMathModeInternal(!!isMathMode)
   }, [isMathMode])
 
-  const handleChange = (newValue: string) => {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const newValue = e.target.value
+    cursorPositionRef.current = e.target.selectionStart
+
     onChange(newValue)
+
+    // Restore cursor position after state update
+    if (cursorPositionRef.current !== null) {
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(cursorPositionRef.current, cursorPositionRef.current)
+        }
+      })
+    }
+
     if (isMathModeInternal) {
       try {
         if (newValue) {
@@ -42,14 +58,21 @@ function MathInput({ value, onChange, placeholder, isMathMode, onPaste, readOnly
     }
   }
 
+  // Handle focus to store cursor position
+  const handleFocus = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    cursorPositionRef.current = e.target.selectionStart
+  }
+
   return (
     <div className="space-y-2">
       {/* Math toggle button removed; only display math preview if in math mode */}
       {isMathModeInternal ? (
         <div className="space-y-2">
           <Textarea
+            ref={textareaRef}
             value={value}
-            onChange={(e) => handleChange(e.target.value)}
+            onChange={handleChange}
+            onFocus={handleFocus}
             onPaste={onPaste}
             placeholder={placeholder}
             className={`min-h-[60px] resize-y font-mono ${readOnly ? 'focus-visible:ring-0 focus-visible:border-none border-gray-300' : ''}`}
@@ -66,8 +89,10 @@ function MathInput({ value, onChange, placeholder, isMathMode, onPaste, readOnly
         </div>
       ) : (
         <Textarea
+          ref={textareaRef}
           value={value}
-          onChange={(e) => handleChange(e.target.value)}
+          onChange={handleChange}
+          onFocus={handleFocus}
           onPaste={onPaste}
           placeholder={placeholder}
           className={`min-h-[60px] resize-y ${readOnly ? 'focus-visible:ring-0 focus-visible:border-none border-gray-300' : ''}`}
@@ -111,7 +136,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    // Set a new timeout
+    // Set a new timeout with a longer delay
     saveTimeoutRef.current = setTimeout(() => {
       updateNote({
         ...note,
@@ -119,7 +144,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
         blocks,
         tags,
       });
-    }, 300); // 300ms debounce
+    }, 1000); // Increased to 1000ms (1 second) debounce
   }, [note, title, blocks, tags, updateNote]);
 
   // Auto-save when content changes

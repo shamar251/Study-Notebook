@@ -13,8 +13,10 @@ const Textarea = React.forwardRef<
   const resize = React.useCallback(() => {
     const textarea = innerRef.current;
     if (textarea) {
+      const { selectionStart, selectionEnd } = textarea;
       textarea.style.height = "auto";
       textarea.style.height = textarea.scrollHeight + "px";
+      textarea.setSelectionRange(selectionStart, selectionEnd);
     }
   }, []);
 
