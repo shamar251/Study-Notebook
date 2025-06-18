@@ -335,10 +335,21 @@ export default function NoteApp() {
     // This prevents the infinite update loop
   }
 
-  const selectStudyMode = (mode: "flashcards" | "quiz" | "test") => {
-    setActiveNote(null);
-    setView(mode);
-    setShowStudyModeSelector(false);
+  const selectStudyMode = (mode: "flashcards" | "quiz" | "test", note?: Note, subfolderId?: string) => {
+    if (note) {
+      setActiveNote(note);
+      setView(mode);
+      setShowStudyModeSelector(false);
+    } else if (subfolderId) {
+      setActiveFolder(subfolderId);
+      setActiveNote(null);
+      setView(mode);
+      setShowStudyModeSelector(false);
+    } else {
+      setActiveNote(null);
+      setView(mode);
+      setShowStudyModeSelector(false);
+    }
   };
 
   const getFolderNotes = async (folderId: string): Promise<Note[]> => {
