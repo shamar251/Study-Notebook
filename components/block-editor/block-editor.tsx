@@ -1,0 +1,520 @@
+"use client"
+
+import React from "react"
+import { X, FunctionSquare, Link as LinkIcon, Shuffle } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Badge } from "@/components/ui/badge"
+import { InlineMath } from 'react-katex'
+import type { Block } from "@/lib/db"
+import { MathInput } from "@/components/block-editor/math-input"
+import {
+  BLOCK_TYPE_COLORS,
+  BLOCK_TYPE_LABELS,
+  BLOCK_TYPE_ICONS,
+  BLOCK_TYPE_PLACEHOLDERS,
+  BLOCK_TYPE_BADGE_CLASSES
+} from "@/lib/block-types"
+import { WhereBlockEditor } from "./blocks/where-block-editor"
+import { BlockConnectionManager } from "@/lib/block-connections"
+import { BlockConnectionManager as BlockConnectionManagerUI } from "@/components/block-connection-manager"
+import { ConnectionOptions } from "@/components/connection-options"
+import { getConnectedGroup } from "@/hooks/use-block-connections"
+
+interface BlockEditorProps {
+  block: Block
+  index: number
+  blocks: Block[]
+  previewMode: "edit" | "preview"
+  onUpdateBlock: (
+    id: string,
+    content: string,
+    math?: boolean,
+    location?: Block["location"]
+  ) => void
+  onUpdateBlockImmediate: (id: string, math: boolean) => void
+  onDeleteBlock: (id: string) => void
+  onAddWhatBlock: (whoBlockId: string) => void
+  onToggleTruthState: (blockId: string) => void
+  onRemoveBlockImage: (blockId: string) => void
+  onUpdateBlockLanguage: (blockId: string, language: string) => void
+  onPaste: (
+    e: React.ClipboardEvent<HTMLTextAreaElement | HTMLInputElement>,
+    blockId?: string
+  ) => void
+  isWhoBlockConnected: (block: Block, blocks: Block[]) => boolean
+  countConnectedWhatBlocks: (block: Block, blocks: Block[]) => number
+  countConnectedBlocks: (block: Block, blocks: Block[]) => number
+  getExistingWhereBlocks: () => Block[]
+  onAddBlockAndConnect?: (type: Block["type"], parentBlockId?: string) => void
+  onConnectBlocks?: (sourceBlockId: string, targetBlockId: string) => void
+  onDisconnectBlocks?: (sourceBlockId: string, targetBlockId: string) => void
+  entityId?: string
+  groupId?: string
+  countAllLinkedBlocksInGroup: (block: Block, blocks: Block[]) => number
+  isFirstInGroup?: boolean
+  isLastInGroup?: boolean
+}
+
+// Helper to determine if this block is in a linked group (any type of connection)
+function isBlockInLinkedGroup(block: Block, allBlocks: Block[]): boolean {
+  // Check if this block has any connections or is connected to by others
+  const hasOutgoingConnections = block.linkedBlockIds && block.linkedBlockIds.length > 0;
+  const hasIncomingConnections = allBlocks.some(b => b.linkedBlockIds?.includes(block.id));
+
+  if (!hasOutgoingConnections && !hasIncomingConnections) return false;
+
+  // Traverse linkedBlockIds forward and backward to find all connected blocks
+  const visited = new Set<string>();
+  function traverse(b: Block) {
+    if (!b || visited.has(b.id)) return;
+    visited.add(b.id);
+    // Forward
+    (b.linkedBlockIds || []).forEach(id => {
+      const next = allBlocks.find(x => x.id === id);
+      if (next) traverse(next);
+    });
+    // Backward
+    allBlocks.forEach(x => {
+      if (x.linkedBlockIds?.includes(b.id)) traverse(x);
+    });
+  }
+  traverse(block);
+  return visited.size > 1; // More than one block in the linked group
+}
+
+export function BlockEditor({
+  block,
+  index,
+  blocks,
+  previewMode,
+  onUpdateBlock,
+  onUpdateBlockImmediate,
+  onDeleteBlock,
+  onAddWhatBlock,
+  onToggleTruthState,
+  onRemoveBlockImage,
+  onUpdateBlockLanguage,
+  onPaste,
+  isWhoBlockConnected,
+  countConnectedWhatBlocks,
+  countConnectedBlocks,
+  getExistingWhereBlocks,
+  onAddBlockAndConnect,
+  onConnectBlocks,
+  onDisconnectBlocks,
+  entityId,
+  groupId,
+  countAllLinkedBlocksInGroup,
+  isFirstInGroup,
+  isLastInGroup
+}: BlockEditorProps) {
+
+  const renderBlockContent = () => {
+    switch (block.type) {
+      case "who":
+        return (
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-full min-w-[350px] md:min-w-[500px]">
+                <MathInput
+                  value={block.content}
+                  onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+                  placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+                  isMathMode={block.math}
+                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+                />
+              </div>
+            </div>
+            {block.image && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.image}
+                  alt="Block image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onRemoveBlockImage(block.id)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      case "what":
+        return (
+          <div>
+            <div className="flex items-center gap-200 mb-1">
+              <div className="w-full min-w-[350px] md:min-w-[500px]">
+                <MathInput
+                  value={block.content}
+                  onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+                  placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+                  isMathMode={block.math}
+                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+                  readOnly={block.truthState === "true" || block.truthState === "false"}
+                />
+              </div>
+            </div>
+            {block.image && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.image}
+                  alt="Block image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onRemoveBlockImage(block.id)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      case "note":
+        return (
+          <div>
+            <MathInput
+              value={block.content}
+              onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+              placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+              isMathMode={block.math}
+              onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+            />
+            {block.image && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.image}
+                  alt="Block image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onRemoveBlockImage(block.id)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      case "image":
+        return (
+          <div className="space-y-2">
+            {!block.content && (
+              <Input
+                type="text"
+                value={block.content}
+                onChange={(e) => onUpdateBlock(block.id, e.target.value)}
+                onPaste={(e) => onPaste(e, block.id)}
+                placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 shadow-none"
+              />
+            )}
+            {block.content && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.content}
+                  alt="Note image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onUpdateBlock(block.id, "")}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      case "video":
+        return (
+          <div className="space-y-2">
+            <Input
+              type="text"
+              value={block.content}
+              onChange={(e) => onUpdateBlock(block.id, e.target.value)}
+              onPaste={(e) => onPaste(e, block.id)}
+              placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+              className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 shadow-none"
+            />
+            {block.content && !block.content.startsWith('data:image') && (
+              <div className="mt-2">
+                <div className="aspect-video rounded-md bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
+                  <span className="text-gray-500">Video Embed Placeholder</span>
+                </div>
+              </div>
+            )}
+            {block.content && block.content.startsWith('data:image') && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.content}
+                  alt="Note image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onUpdateBlock(block.id, "")}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      case "code":
+        return (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 mb-1">
+              <Input
+                type="text"
+                value={block.language || ""}
+                onChange={(e) => onUpdateBlockLanguage(block.id, e.target.value)}
+                placeholder="Language (python, javascript, etc.)"
+                className="w-40 h-7 text-xs"
+              />
+            </div>
+            <Textarea
+              value={block.content}
+              onChange={(e) => onUpdateBlock(block.id, e.target.value)}
+              onPaste={(e) => onPaste(e, block.id)}
+              className="min-h-[100px] resize-y font-mono text-sm border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 shadow-none"
+              placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+            />
+            {block.content && block.content.startsWith('data:image') && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.content}
+                  alt="Note image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onUpdateBlock(block.id, "")}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      case "where": {
+        const handleUpdate = (
+          id: string,
+          content: string,
+          location?: Block["location"]
+        ) => {
+          onUpdateBlock(id, content, undefined, location)
+        }
+        return (
+          <WhereBlockEditor
+            block={block}
+            onUpdateBlock={handleUpdate}
+            getExistingWhereBlocks={getExistingWhereBlocks}
+          />
+        )
+      }
+      case "how":
+        return (
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-full min-w-[350px] md:min-w-[500px]">
+                <MathInput
+                  value={block.content}
+                  onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+                  placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+                  isMathMode={block.math}
+                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+                />
+              </div>
+            </div>
+            {block.image && (
+              <div className="mt-2 relative group">
+                <img
+                  src={block.image}
+                  alt="Block image"
+                  className="max-w-full h-auto rounded-md"
+                />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+                    onClick={() => onRemoveBlockImage(block.id)}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      default:
+        return null
+    }
+  }
+
+  // Use centralized connection logic instead of duplicating it
+  const connectionState = BlockConnectionManager.getConnectionState(block, index, blocks)
+  const blockClass = BlockConnectionManager.getBlockClasses(block, connectionState)
+
+  // Find all blocks in the same linked group as this block, sorted by their order in the note
+  const groupBlocks = getConnectedGroup(block, blocks).sort((a, b) => blocks.indexOf(a) - blocks.indexOf(b));
+  const groupIndex = groupBlocks.findIndex(b => b.id === block.id);
+  let borderRadiusClass = "";
+  if (groupBlocks.length === 1) {
+    borderRadiusClass = "rounded-lg";
+  } else if (groupIndex === 0) {
+    borderRadiusClass = "rounded-t-lg";
+  } else if (groupIndex === groupBlocks.length - 1) {
+    borderRadiusClass = "rounded-b-lg";
+  }
+
+  // Determine if this block is in a linked group
+  const inLinkedGroup = isBlockInLinkedGroup(block, blocks);
+
+  // Check if this block is connected to make it stick to others
+  const shouldStick = inLinkedGroup;
+
+  return (
+    <div
+      className={`group relative border-l-4 ${BLOCK_TYPE_COLORS[block.type]} pl-3 ${shouldStick ? "py-0.5 border-b-0" : "py-2"} hover:bg-gray-50 dark:hover:bg-gray-800/50 ${borderRadiusClass}`}
+    >
+      <div className="flex items-start gap-2">
+        <div className="flex-none w-8 text-right text-xs text-gray-500 mt-1 font-mono">[{index + 1}]</div>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-2">
+            {onAddBlockAndConnect && onConnectBlocks && onDisconnectBlocks ? (
+              <BlockConnectionManagerUI
+                block={block}
+                allBlocks={blocks}
+                onAddBlock={onAddBlockAndConnect}
+                onConnectBlocks={onConnectBlocks}
+                onDisconnectBlocks={onDisconnectBlocks}
+              >
+                <Badge
+                  variant="outline"
+                  className={`flex items-center gap-1 ${BLOCK_TYPE_BADGE_CLASSES[block.type]} cursor-pointer`}
+                >
+                  {BLOCK_TYPE_ICONS[block.type]}
+                  <span>{BLOCK_TYPE_LABELS[block.type]}</span>
+                </Badge>
+              </BlockConnectionManagerUI>
+            ) : (
+              <Badge
+                variant="outline"
+                className={`flex items-center gap-1 ${BLOCK_TYPE_BADGE_CLASSES[block.type]}`}
+              >
+                {BLOCK_TYPE_ICONS[block.type]}
+                <span>{BLOCK_TYPE_LABELS[block.type]}</span>
+              </Badge>
+            )}
+            {(block.type === "who" || block.type === "what" || block.type === "note") && (
+              <button
+                onClick={() => onUpdateBlockImmediate(block.id, !block.math)}
+                title={block.math ? "Math mode enabled" : "Enable math mode"}
+                className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors
+                  ${block.type === "who"
+                    ? block.math
+                      ? "bg-blue-100 border-blue-500 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200"
+                      : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                    : block.type === "what"
+                      ? block.math
+                        ? "bg-green-100 border-green-500 text-green-800 dark:bg-green-900/30 dark:text-green-200"
+                        : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                      : block.type === "note"
+                        ? block.math
+                          ? "bg-purple-100 border-purple-500 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200"
+                          : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                        : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                  }`}
+                style={{ verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center' }}
+              >
+                <FunctionSquare className="w-4 h-4" />
+              </button>
+            )}
+            {block.type === "who" && (
+              <span className="flex items-center ml-auto">
+                {isWhoBlockConnected(block, blocks) ? (
+                  <span className="flex items-center text-xs text-black dark:text-white px-1 py-0.5">
+                    {countAllLinkedBlocksInGroup(block, blocks)}
+                    <LinkIcon className="w-3.5 h-3.5 ml-1 inline" />
+                  </span>
+                ) : (
+                  <span className="text-xs text-amber-600 dark:text-amber-400">
+                    <LinkIcon className="w-3.5 h-3.5 ml-1 inline" />
+                  </span>
+                )}
+              </span>
+            )}
+            {block.type === "what" && (
+              <button
+                onClick={() => onToggleTruthState(block.id)}
+                title={
+                  block.truthState === "true"
+                    ? "True statement (click to set False)"
+                    : block.truthState === "false"
+                      ? "False statement (click to restore)"
+                      : "Toggle to True/False statement"
+                }
+                className={`ml-1 px-2 py-0.5 rounded-full text-xs font-bold border transition-colors
+                  ${block.truthState === "true"
+                    ? "bg-pr-100 border-green-500 text-green-800 dark:bg-green-900/30 dark:text-green-200"
+                    : block.truthState === "false"
+                      ? "bg-red-100 border-red-500 text-red-800 dark:bg-red-900/30 dark:text-red-200"
+                      : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                  }`}
+                style={{ verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center', minWidth: 28, justifyContent: 'center' }}
+              >
+                {block.truthState === "true" ? 'T' : block.truthState === "false" ? 'F' : 'T/F'}
+              </button>
+            )}
+          </div>
+          {renderBlockContent()}
+        </div>
+        <div className="flex-none">
+          {previewMode === "edit" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 opacity-0 group-hover:opacity-100"
+              onClick={() => onDeleteBlock(block.id)}
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+} 

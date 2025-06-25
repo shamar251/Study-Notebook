@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import type { Note } from "@/components/note-app"
+import type { Folder } from '@/lib/db'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { db } from "@/lib/db"
@@ -28,6 +29,8 @@ interface FolderStudyModeProps {
   folderDescription?: string
   folderNotes: Note[]
   subfolders: Subfolder[]
+  folders: Folder[]
+  notes: Note[]
   onOpenSubfolder: (subfolderId: string) => void
   onCreateNote: () => void
   onCreateSubfolder: () => void
@@ -37,11 +40,172 @@ interface FolderStudyModeProps {
   onNoteClick: (note: Note) => void
 }
 
+// Recursive component for rendering nested folders
+interface NestedFolderProps {
+  folder: Subfolder
+  allNotes: Note[]
+  allFolders: Folder[]
+  expandedFolders: { [id: string]: boolean }
+  setExpandedFolders: React.Dispatch<React.SetStateAction<{ [id: string]: boolean }>>
+  noteTestSessions: { [noteId: string]: any }
+  subfolderTestSessions: { [subfolderId: string]: any }
+  onOpenSubfolder: (subfolderId: string) => void
+  onSelectMode: (mode: "flashcards" | "quiz" | "test", note?: Note, subfolderId?: string) => void
+  onNoteClick: (note: Note) => void
+  depth: number
+}
+
+function NestedFolder({
+  folder,
+  allNotes,
+  allFolders,
+  expandedFolders,
+  setExpandedFolders,
+  noteTestSessions,
+  subfolderTestSessions,
+  onOpenSubfolder,
+  onSelectMode,
+  onNoteClick,
+  depth
+}: NestedFolderProps) {
+  // Get child folders for this folder
+  const childFolders = allFolders
+    .filter(f => f.parentId === folder.id)
+    .map(f => ({ id: f.id, name: f.name, description: f.description }));
+
+  // Get notes that belong directly to this folder
+  const currentFolderNotes = allNotes.filter(note => note.folderId === folder.id);
+
+  return (
+    <>
+      <div className="flex items-center mb-2 px-2 py-1 hover:bg-accent/30 rounded" style={{ marginLeft: `${depth * 16}px` }}>
+        {/* Chevron column (fixed width) */}
+        <div className="w-6 flex-shrink-0 flex items-center justify-center">
+          {(childFolders.length > 0 || currentFolderNotes.length > 0) && (
+            <button
+              className="p-1 focus:outline-none"
+              onClick={() => setExpandedFolders((prev: { [id: string]: boolean }) => ({ ...prev, [folder.id]: !prev[folder.id] }))}
+              aria-label={expandedFolders[folder.id] ? 'Collapse' : 'Expand'}
+            >
+              {expandedFolders[folder.id] ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+            </button>
+          )}
+        </div>
+        {/* Icon+name column */}
+        <div className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer" onClick={() => onOpenSubfolder(folder.id)}>
+          <FolderIcon className="w-5 h-5 text-black" />
+          <span className="text-base text-gray-700 dark:text-gray-100 font-medium truncate">{folder.name}</span>
+        </div>
+        {/* Buttons group column (fixed width) */}
+        <div className="flex gap-2 min-w-[250px] justify-between items-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex items-center w-[90px] justify-start"
+            onClick={e => {
+              e.stopPropagation();
+              onSelectMode("flashcards", undefined, folder.id);
+            }}
+          >
+            <Layers className="w-4 h-4 mr-2" /> Cards
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex items-center w-[110px] justify-start"
+            onClick={e => {
+              e.stopPropagation();
+              onSelectMode("test", undefined, folder.id);
+            }}
+          >
+            <Timer className="w-4 h-4 mr-2" />
+            <span className="inline-block min-w-[48px] text-left">
+              Test ({subfolderTestSessions[folder.id]?.score !== undefined ? subfolderTestSessions[folder.id].score + '%' : '-'})
+            </span>
+          </Button>
+        </div>
+      </div>
+
+      {expandedFolders[folder.id] && (
+        <div>
+          {/* Render notes in this folder */}
+          {currentFolderNotes.map(note => (
+            <div
+              key={note.id}
+              className="flex items-center justify-between p-2 hover:bg-accent/20 rounded-md cursor-pointer"
+              onClick={() => onNoteClick(note)}
+              style={{ marginLeft: `${(depth + 1) * 16}px` }}
+            >
+              {/* Chevron placeholder for alignment */}
+              <div className="w-6 flex-shrink-0" />
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <FileText className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm">{note.title}</span>
+              </div>
+              <div className="flex items-center gap-2 min-w-[250px] justify-between">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex items-center w-[90px] justify-start"
+                  onClick={e => {
+                    e.stopPropagation();
+                    onSelectMode("flashcards", note);
+                  }}
+                >
+                  <Layers className="w-4 h-4 mr-2" /> Cards
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex items-center w-[110px] justify-start"
+                  onClick={e => {
+                    e.stopPropagation();
+                    onSelectMode("test", note);
+                  }}
+                >
+                  <Timer className="w-4 h-4 mr-2" />
+                  <span className="inline-block min-w-[48px] text-left">
+                    Test ({noteTestSessions[note.id]?.score !== undefined ? noteTestSessions[note.id].score + '%' : '-'})
+                  </span>
+                </Button>
+              </div>
+            </div>
+          ))}
+
+          {/* Recursively render child folders */}
+          {childFolders.map(childFolder => (
+            <NestedFolder
+              key={childFolder.id}
+              folder={childFolder}
+              allNotes={allNotes}
+              allFolders={allFolders}
+              expandedFolders={expandedFolders}
+              setExpandedFolders={setExpandedFolders}
+              noteTestSessions={noteTestSessions}
+              subfolderTestSessions={subfolderTestSessions}
+              onOpenSubfolder={onOpenSubfolder}
+              onSelectMode={onSelectMode}
+              onNoteClick={onNoteClick}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function FolderStudyMode({
   folderName,
   folderDescription,
   folderNotes,
   subfolders = [],
+  folders,
+  notes,
   onOpenSubfolder,
   onCreateNote,
   onCreateSubfolder,
@@ -61,7 +225,7 @@ export default function FolderStudyMode({
   const [nestedTestScores, setNestedTestScores] = useState<FolderTestScore[]>([])
   const [mostRecentTest, setMostRecentTest] = useState<FolderTestScore | null>(null)
   const [subfolderTestSessions, setSubfolderTestSessions] = useState<{ [subfolderId: string]: any }>({})
-  const [expandedSubfolders, setExpandedSubfolders] = useState<{ [id: string]: boolean }>({})
+  const [expandedFolders, setExpandedFolders] = useState<{ [id: string]: boolean }>({})
 
   // Update local state if folderName/folderDescription change from parent
   useEffect(() => { setNewName(folderName) }, [folderName])
@@ -117,8 +281,7 @@ export default function FolderStudyMode({
       }
       const childFolderIds = await getAllChildFolderIds(currentFolderId);
       const allFolderIds = [currentFolderId, ...childFolderIds];
-      const allFolders = await db.folders.toArray();
-      const folderMap = new Map(allFolders.map(f => [f.id, f.name]));
+      const folderMap = new Map(folders.map(f => [f.id, f.name]));
       let mostRecent: FolderTestScore | null = null;
       for (const folderId of allFolderIds) {
         const sessions = await db.testSessions.where("folderId").equals(folderId).reverse().toArray();
@@ -137,22 +300,31 @@ export default function FolderStudyMode({
       setMostRecentTest(mostRecent);
     }
     fetchMostRecentTest();
-  }, [folderNotes]);
+  }, [folderNotes, folders]);
 
-  // Fetch latest test session for each subfolder
+  // Fetch latest test session for each subfolder (including nested ones)
   useEffect(() => {
     async function fetchSubfolderTestSessions() {
       const sessions: { [subfolderId: string]: any } = {};
-      for (const sub of subfolders) {
-        const testSessions = await db.testSessions.where("folderId").equals(sub.id).reverse().toArray();
-        if (testSessions.length > 0) {
-          sessions[sub.id] = testSessions[0];
+
+      // Get all descendant folder IDs
+      const currentFolderId = folderNotes[0]?.folderId;
+      if (currentFolderId) {
+        const childFolderIds = await getAllChildFolderIds(currentFolderId);
+        const allFolderIds = [currentFolderId, ...childFolderIds];
+
+        for (const folderId of allFolderIds) {
+          const testSessions = await db.testSessions.where("folderId").equals(folderId).reverse().toArray();
+          if (testSessions.length > 0) {
+            sessions[folderId] = testSessions[0];
+          }
         }
       }
+
       setSubfolderTestSessions(sessions);
     }
     fetchSubfolderTestSessions();
-  }, [subfolders]);
+  }, [folderNotes]);
 
   const handleNameBlur = () => {
     setIsEditingName(false)
@@ -179,8 +351,7 @@ export default function FolderStudyMode({
       const allFolderIds = [currentFolderId, ...childFolderIds];
 
       // Get all folders to map IDs to names
-      const allFolders = await db.folders.toArray();
-      const folderMap = new Map(allFolders.map(f => [f.id, f.name]));
+      const folderMap = new Map(folders.map(f => [f.id, f.name]));
 
       // Get test sessions for all folders
       const testScores: FolderTestScore[] = [];
@@ -260,6 +431,22 @@ export default function FolderStudyMode({
       minute: "2-digit",
     });
   };
+
+  // Helper: find the first-level folder for a note
+  function findRootFolderId(note: Note, folders: Folder[], rootFolderId: string | null): string {
+    let folderId = note.folderId;
+    let lastId = folderId;
+    while (true) {
+      const folder = folders.find(f => f.id === folderId);
+      if (!folder) break;
+      if (folder.parentId === rootFolderId || folder.parentId === null) {
+        return folder.id;
+      }
+      lastId = folder.id;
+      folderId = folder.parentId;
+    }
+    return lastId;
+  }
 
   return (
     <div className="flex-1 overflow-auto w-full h-full border-t rounded-lg border-gray-200">
@@ -362,152 +549,78 @@ export default function FolderStudyMode({
         </div>
 
         <div className="mt-1 rounded-lg bg-gray-50 dark:bg-gray-900 p-4 h-full">
-          {/* Render subfolders and their notes */}
-          {subfolders.map((sub) => (
-            <>
-              <div className="flex items-center mb-2 px-2 py-1 hover:bg-accent/30 rounded">
-                {/* Chevron column (fixed width) */}
-                <div className="w-6 flex-shrink-0 flex items-center justify-center">
-                  <button
-                    className="p-1 focus:outline-none"
-                    onClick={() => setExpandedSubfolders(prev => ({ ...prev, [sub.id]: !prev[sub.id] }))}
-                    aria-label={expandedSubfolders[sub.id] ? 'Collapse' : 'Expand'}
+          {(() => {
+            // Find the current folder object
+            const currentFolder = folders.find(f => f.name === folderName);
+            if (!currentFolder) return null;
+            // Notes directly in the current folder
+            const currentFolderNotes = notes.filter(note => note.folderId === currentFolder.id);
+            // Direct subfolders of the current folder
+            const directSubfolders = folders.filter(f => f.parentId === currentFolder.id);
+            return (
+              <>
+                {/* Render notes in the current folder */}
+                {currentFolderNotes.map(note => (
+                  <div
+                    key={note.id}
+                    className="flex items-center justify-between p-2 hover:bg-accent/20 rounded-md cursor-pointer"
+                    onClick={() => onNoteClick(note)}
                   >
-                    {expandedSubfolders[sub.id] ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                {/* Icon+name column */}
-                <div className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer" onClick={() => onOpenSubfolder(sub.id)}>
-                  <FolderIcon className="w-5 h-5 text-black" />
-                  <span className="text-base text-gray-700 dark:text-gray-100 font-medium truncate">{sub.name}</span>
-                </div>
-                {/* Buttons group column (fixed width) */}
-                <div className="flex gap-2 min-w-[250px] justify-between items-center">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center w-[90px] justify-start"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onSelectMode("flashcards", undefined, sub.id);
-                    }}
-                  >
-                    <Layers className="w-4 h-4 mr-2" /> Cards
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center w-[110px] justify-start"
-                    onClick={e => {
-                      e.stopPropagation();
-                      onSelectMode("test", undefined, sub.id);
-                    }}
-                  >
-                    <Timer className="w-4 h-4 mr-2" />
-                    <span className="inline-block min-w-[48px] text-left">
-                      Test ({subfolderTestSessions[sub.id]?.score !== undefined ? subfolderTestSessions[sub.id].score + '%' : '-'})
-                    </span>
-                  </Button>
-                </div>
-              </div>
-              {expandedSubfolders[sub.id] && (
-                <div className="ml-8">
-                  {folderNotes
-                    .filter(note => note.folderId === sub.id)
-                    .map(note => (
-                      <div
-                        key={note.id}
-                        className="flex items-center justify-between p-2 hover:bg-accent/20 rounded-md cursor-pointer"
-                        onClick={() => onNoteClick(note)}
+                    {/* Chevron placeholder for alignment */}
+                    <div className="w-6 flex-shrink-0" />
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <FileText className="w-4 h-4 text-muted-foreground" />
+                      <span className="text-sm">{note.title}</span>
+                    </div>
+                    <div className="flex items-center gap-2 min-w-[250px] justify-between">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="flex items-center w-[90px] justify-start"
+                        onClick={e => {
+                          e.stopPropagation();
+                          onSelectMode("flashcards", note);
+                        }}
                       >
-                        {/* Chevron placeholder for alignment */}
-                        <div className="w-6 flex-shrink-0" />
-                        <div className="flex items-center gap-2 flex-1 min-w-0">
-                          <FileText className="w-4 h-4 text-muted-foreground" />
-                          <span className="text-sm">{note.title}</span>
-                        </div>
-                        <div className="flex items-center gap-2 min-w-[250px] justify-between">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="flex items-center w-[90px] justify-start"
-                            onClick={e => {
-                              e.stopPropagation();
-                              onSelectMode("flashcards", note);
-                            }}
-                          >
-                            <Layers className="w-4 h-4 mr-2" /> Cards
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="flex items-center w-[110px] justify-start"
-                            onClick={e => {
-                              e.stopPropagation();
-                              onSelectMode("test", note);
-                            }}
-                          >
-                            <Timer className="w-4 h-4 mr-2" />
-                            <span className="inline-block min-w-[48px] text-left">
-                              Test ({noteTestSessions[note.id]?.score !== undefined ? noteTestSessions[note.id].score + '%' : '-'})
-                            </span>
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </>
-          ))}
-
-          {/* Notes not in any subfolder */}
-          {folderNotes
-            .filter(note => !subfolders.some(sub => sub.id === note.folderId))
-            .map(note => (
-              <div
-                key={note.id}
-                className="flex items-center justify-between p-2 hover:bg-accent/20 rounded-md cursor-pointer"
-                onClick={() => onNoteClick(note)}
-              >
-                {/* Chevron placeholder for alignment */}
-                <div className="w-6 flex-shrink-0" />
-                <div className="flex items-center gap-2 flex-1 min-w-0">
-                  <FileText className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm">{note.title}</span>
-                </div>
-                <div className="flex items-center gap-2 min-w-[250px] justify-between">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center w-[90px] justify-start"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onSelectMode("flashcards", note)
-                    }}
-                  >
-                    <Layers className="w-4 h-4 mr-2" /> Cards
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="flex items-center w-[110px] justify-start"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onSelectMode("test", note)
-                    }}
-                  >
-                    <Timer className="w-4 h-4 mr-2" />
-                    <span className="inline-block min-w-[48px] text-left">
-                      Test ({noteTestSessions[note.id]?.score !== undefined ? noteTestSessions[note.id].score + '%' : '-'})
-                    </span>
-                  </Button>
-                </div>
-              </div>
-            ))}
+                        <Layers className="w-4 h-4 mr-2" /> Cards
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="flex items-center w-[110px] justify-start"
+                        onClick={e => {
+                          e.stopPropagation();
+                          onSelectMode("test", note);
+                        }}
+                      >
+                        <Timer className="w-4 h-4 mr-2" />
+                        <span className="inline-block min-w-[48px] text-left">
+                          Test ({noteTestSessions[note.id]?.score !== undefined ? noteTestSessions[note.id].score + '%' : '-'})
+                        </span>
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {/* Render direct subfolders recursively */}
+                {directSubfolders.map(sub => (
+                  <NestedFolder
+                    key={sub.id}
+                    folder={{ id: sub.id, name: sub.name, description: sub.description }}
+                    allNotes={notes}
+                    allFolders={folders}
+                    expandedFolders={expandedFolders}
+                    setExpandedFolders={setExpandedFolders}
+                    noteTestSessions={noteTestSessions}
+                    subfolderTestSessions={subfolderTestSessions}
+                    onOpenSubfolder={onOpenSubfolder}
+                    onSelectMode={onSelectMode}
+                    onNoteClick={onNoteClick}
+                    depth={0}
+                  />
+                ))}
+              </>
+            );
+          })()}
         </div>
       </div>
 

@@ -12,6 +12,10 @@ import { DndContext, closestCenter } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from '@dnd-kit/utilities';
 import { SequenceQuestion } from './SequenceQuestion';
+import { BlockConnectionManager } from "@/lib/block-connections"
+import 'katex/dist/katex.min.css'
+import { InlineMath } from 'react-katex'
+import { generateQuizQuestions, AnyQuizQuestion } from '@/lib/question-generator';
 
 // Helper: durations in minutes
 const DURATIONS = [15, 30, 60];
@@ -55,119 +59,179 @@ async function getAllNotesInFolders(folderIds: string[]): Promise<Note[]> {
   return allNotes.filter(n => allFolderIds.includes(n.folderId));
 }
 
-// Helper to generate options for a question (copied from quiz-view)
-function generateOptions(correctAnswer: string, notesList: Note[], blockType: "who" | "what"): string[] {
-  const allAnswers: string[] = [];
-  notesList.forEach((noteItem) => {
-    noteItem.blocks
-      .filter((block) => block.type === blockType)
-      .forEach((block) => {
-        // Exclude WHAT blocks with a truthState from being used as options
-        if (blockType === "what" && (block as any).truthState) return;
-        // Exclude WHO blocks linked to a WHAT block with a truthState
-        if (blockType === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-          const whatBlock = noteItem.blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
-          if (whatBlock && whatBlock.truthState) return;
-        }
-        if (block.content !== correctAnswer) {
-          allAnswers.push(block.content)
-        }
-      })
-  })
-  const shuffled = allAnswers.sort(() => Math.random() - 0.5).slice(0, 3)
-  return [...shuffled, correctAnswer].sort(() => Math.random() - 0.5)
+// Helper to get ordered HOW blocks in the same group as a WHO block
+function getOrderedHowBlocksForWho(whoBlock: Block, allBlocks: Block[]): Block[] {
+  // Use the same robust group traversal as the editor
+  const visited = new Set<string>();
+  function traverse(b: Block) {
+    if (!b || visited.has(b.id)) return;
+    visited.add(b.id);
+    // Forward
+    (b.linkedBlockIds || []).forEach(id => {
+      const next = allBlocks.find(x => x.id === id);
+      if (next) traverse(next);
+    });
+    // Backward
+    allBlocks.forEach(x => {
+      if (x.linkedBlockIds?.includes(b.id)) traverse(x);
+    });
+  }
+  traverse(whoBlock);
+  // Get all blocks in the group
+  const groupBlocks = allBlocks.filter(b => visited.has(b.id));
+  // Filter HOW blocks only (exclude WHO and others)
+  return groupBlocks
+    .filter(b => b.type === "how")
+    .sort((a, b) => allBlocks.indexOf(a) - allBlocks.indexOf(b));
+}
+
+// Helper to generate options for a question
+function generateOptions(correctAnswer: string, allWhatBlocks: string[], exclude: string[]): string[] {
+  // Exclude the correct answer and any in the exclude list
+  const pool = allWhatBlocks.filter(w => w !== correctAnswer && !exclude.includes(w));
+  // Shuffle and pick up to 3 distractors
+  const distractors = pool.sort(() => Math.random() - 0.5).slice(0, 3);
+  // Add the correct answer and shuffle again
+  const options = [...distractors, correctAnswer].sort(() => Math.random() - 0.5);
+  // Remove duplicates just in case
+  return Array.from(new Set(options));
 }
 
 // Helper to generate test questions (copied from quiz-view)
 function generateTestQuestions(notes: Note[]): any[] {
-  const quizQuestions: any[] = [];
-  function getAllLinkedWhatBlocks(whoBlock: Block, allBlocks: Block[]): Block[] {
-    const result: Block[] = [];
-    let currentIds = whoBlock.linkedBlockIds ? [...whoBlock.linkedBlockIds] : [];
-    while (currentIds.length > 0) {
-      const nextId = currentIds[0];
-      const nextBlock = allBlocks.find(b => b.id === nextId && b.type === "what");
-      if (!nextBlock) break;
-      result.push(nextBlock);
-      currentIds = nextBlock.linkedBlockIds ? [...nextBlock.linkedBlockIds] : [];
+  const quizQuestions: any[] = []
+
+  // Precompute all groups (each group is a set of block IDs)
+  const allBlocks = notes.flatMap(note => note.blocks);
+  const groups: Block[][] = [];
+  const visitedGlobal = new Set<string>();
+  for (const block of allBlocks) {
+    if (visitedGlobal.has(block.id)) continue;
+    // Traverse to get the group for this block
+    const visited = new Set<string>();
+    function traverse(b: Block) {
+      if (!b || visited.has(b.id)) return;
+      visited.add(b.id);
+      (b.linkedBlockIds || []).forEach(id => {
+        const next = allBlocks.find(x => x.id === id);
+        if (next) traverse(next);
+      });
+      allBlocks.forEach(x => {
+        if (x.linkedBlockIds?.includes(b.id)) traverse(x);
+      });
     }
-    return result;
+    traverse(block);
+    if (visited.size > 0) {
+      groups.push(allBlocks.filter(b => visited.has(b.id)));
+      visited.forEach(id => visitedGlobal.add(id));
+    }
   }
+
+  function findGroupForBlock(blockId: string): Block[] | undefined {
+    return groups.find(g => g.some(b => b.id === blockId));
+  }
+
   function addQuizQuestionsFromBlocks(blocks: Block[], noteId: string, noteTitle: string, noteObj: Note) {
+    // Find all WHO blocks
+    const whoBlocks = blocks.filter(b => b.type === "who");
+    for (const whoBlock of whoBlocks) {
+      // Find all blocks in the group (traverse connections)
+      const groupBlocks = findGroupForBlock(whoBlock.id) || [];
+      // Get all WHAT blocks in the group (including those with truthState)
+      const groupWhatBlocks = groupBlocks.filter(b => b.type === "what");
+      const groupWhatContents = groupWhatBlocks.map(b => b.content);
+      // For each WHAT block in the group, create a question
+      for (const whatBlock of groupWhatBlocks) {
+        if ((whatBlock as any).truthState) {
+          // True/False question
+          quizQuestions.push({
+            id: `${whoBlock.id}-${whatBlock.id}-tf`,
+            type: "true/false",
+            question: whoBlock.content,
+            statement: whatBlock.content,
+            answer: (whatBlock as any).truthState === "true" ? "True" : "False",
+            options: ["True", "False"].sort(() => Math.random() - 0.5),
+            questionImage: whoBlock.image,
+            answerImage: whatBlock.image,
+            noteId,
+            noteTitle,
+            math: whoBlock.math,
+          });
+        } else {
+          // MCQ: Only one WHAT from the current group (the correct answer), distractors from other groups (by group membership)
+          // Find all WHAT blocks from groups other than the current group
+          const currentGroup = findGroupForBlock(whatBlock.id) || [];
+          const currentGroupIds = new Set(currentGroup.map(b => b.id));
+          const distractorPool = allBlocks.filter(b => b.type === "what" && !(b as any).truthState && !currentGroupIds.has(b.id));
+          // Debug logging
+          console.log('--- MCQ Generation ---');
+          console.log('Question:', whoBlock.content);
+          console.log('Correct WHAT:', whatBlock.id, whatBlock.content);
+          console.log('Current group block IDs:', Array.from(currentGroupIds));
+          console.log('Distractor pool:', distractorPool.map(b => ({ id: b.id, content: b.content })));
+          // Pick up to 3 distractors, but never include WHATs from the same group or with the same content as the correct answer
+          const correctContent = whatBlock.content;
+          const distractors = distractorPool
+            .filter(b => b.content !== correctContent)
+            .map(b => b.content)
+            .filter((c, i, arr) => arr.indexOf(c) === i) // unique by content
+            .slice(0, 3);
+          const options = [...distractors, correctContent].sort(() => Math.random() - 0.5);
+          quizQuestions.push({
+            id: `${whoBlock.id}-${whatBlock.id}`,
+            type: "multiple-choice",
+            question: whoBlock.content,
+            answer: whatBlock.content,
+            options,
+            questionImage: whoBlock.image,
+            answerImage: whatBlock.image,
+            noteId,
+            noteTitle,
+            math: whoBlock.math,
+          });
+        }
+      }
+    }
+    // Keep sequence and true/false logic as before
     blocks.forEach((block) => {
-      // Sequence mode: who with 2+ linked what blocks (chain-aware)
-      if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) {
-        const whatBlocks = getAllLinkedWhatBlocks(block, blocks);
-        if (whatBlocks.length >= 2) {
+      // Sequence mode: who with 2+ linked how blocks (chain-aware)
+      if (BlockConnectionManager.isSequenceBlock(block, blocks)) {
+        const howBlocks = getOrderedHowBlocksForWho(block, blocks);
+        if (howBlocks.length >= 2) {
           quizQuestions.push({
             id: block.id + "-sequence",
             type: "sequence",
             question: block.content,
-            sequence: whatBlocks.map(b => b.content),
-            options: [...whatBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
+            sequence: howBlocks.map(b => b.content),
+            options: [...howBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
             noteId,
             noteTitle,
           });
-          return; // Do not create regular MCQs for this who block
         }
+        return; // Do not create regular MCQs for this who block
       }
-      // True/False questions: use WHAT block as the statement, answer is its truthState
-      if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-        const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
+      // True/False questions: only WHO as question, WHAT as statement, user picks True/False
+      if (BlockConnectionManager.isTrueFalseBlock(block, blocks)) {
+        const whatBlock = BlockConnectionManager.findWhatBlock(block, blocks)
         if (whatBlock && whatBlock.truthState) {
-          const statement = block.content; // Use WHO block's content as the question
+          // Only use the statement, not the answer, in the question
+          const statement = whatBlock.originalContent || whatBlock.content;
           quizQuestions.push({
             id: block.id + "-tf",
             type: "true/false",
-            content: statement, // Use WHO block's content as the question
+            question: `${block.content}`,
             answer: whatBlock.truthState === "true" ? "True" : "False",
             options: ["True", "False"].sort(() => Math.random() - 0.5),
+            questionImage: block.image,
+            answerImage: whatBlock.image,
             noteId,
             noteTitle,
+            math: whatBlock.math === true,
           });
-          return;
+          return; // Do not generate regular questions for this pair
         }
       }
-      // Reverse: WHO is the question, WHAT is the answer
-      if (block.type === "who") {
-        if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-          const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
-          if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "") {
-            if (!whatBlock.truthState) {
-              // Create a question from the 'who' asking about the 'what' (reverse direction)
-              quizQuestions.push({
-                id: block.id + "-who-rev",
-                type: "who",
-                content: block.content,
-                answer: whatBlock.content,
-                options: [],
-                noteId,
-                noteTitle,
-              })
-            }
-          }
-        } else {
-          // Old structure: Look for adjacent WHAT blocks
-          const blockIndex = blocks.findIndex(b => b.id === block.id)
-          if (blockIndex !== -1 && blockIndex < blocks.length - 1) {
-            const whatBlock = blocks[blockIndex + 1]
-            if (whatBlock.type === "what" && whatBlock.content && whatBlock.content.trim() !== "") {
-              if (!whatBlock.truthState) {
-                quizQuestions.push({
-                  id: block.id + "-who-old-rev",
-                  type: "who",
-                  content: block.content,
-                  answer: whatBlock.content,
-                  options: [],
-                  noteId,
-                  noteTitle,
-                })
-              }
-            }
-          }
-        }
-      }
-    })
+    });
   }
   notes.forEach(note => addQuizQuestionsFromBlocks(note.blocks, note.id, note.title, note));
   // Deduplicate by id
@@ -190,6 +254,17 @@ function generateOptionsForTest(q: any, allQuestions: any[]): string[] {
   const allAnswers = allQuestions.filter(b => b.type === q.type && b.answer !== q.answer).map(b => b.answer);
   const shuffled = allAnswers.sort(() => Math.random() - 0.5).slice(0, 3);
   return [...shuffled, q.answer].sort(() => Math.random() - 0.5);
+}
+
+// Helper to render text or math (add after imports)
+function renderMathOrText(block: any) {
+  const text = block.question || block.answer || block.option || '';
+  const math = block.math;
+  const normalized = text.replace(/\\/g, '\\');
+  if (math || normalized.includes('$')) {
+    return <InlineMath math={normalized.replace(/^\$/, '').replace(/\$$/, '')} />;
+  }
+  return text;
 }
 
 export default function TestView({ availableFolders, availableNotes = [], onTestComplete, defaultFolderId, defaultNoteId, autoStartIfDefault }: TestViewProps) {
@@ -287,19 +362,7 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     const uniqueNotes = Array.from(noteMap.values());
     const allBlocksFromNotes = uniqueNotes.flatMap(n => n.blocks);
     // Generate questions using quizview logic
-    let testQuestions = generateTestQuestions(uniqueNotes);
-    // For each question, generate options - but preserve sequence question options
-    testQuestions = testQuestions.map(q => {
-      if (q.type === "sequence") {
-        // Keep the original shuffled sequence options
-        return q;
-      }
-      if (q.type === "true/false") {
-        return { ...q, options: ["True", "False"].sort(() => Math.random() - 0.5) };
-      }
-      // For regular MCQs, generate options
-      return { ...q, options: generateOptions(q.answer, uniqueNotes, "what") };
-    });
+    let testQuestions = generateQuizQuestions(uniqueNotes);
     setQuestions(testQuestions);
     setAllBlocksFromNotes(allBlocksFromNotes);
   }
@@ -558,7 +621,10 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     }
     const q = questions[currentIdx];
     const progress = questions.length > 0 ? Math.round(((currentIdx) / questions.length) * 100) : 0;
-    const options = q.options;
+    // Use options as generated for the question
+    const options = q.options || [];
+    // Debug: log options being rendered
+    console.log('Rendering options for question:', q, options);
     // Before rendering SequenceQuestion:
     const allBlocks = questions.length > 0 ? questions.flatMap(qi => qi.blocks) : q ? q.blocks : [];
     // Sequence question UI
@@ -626,20 +692,49 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
               </div>
             </CardHeader>
             <CardContent>
-              <div className="mb-4 text-base font-medium">{q.content}</div>
+              {/* Question text and image */}
+              <div className="mb-4 flex flex-col gap-2">
+                <div className="text-base font-medium">{renderMathOrText(q)}</div>
+                {'questionImage' in q && q.questionImage && (
+                  <div className="flex justify-center">
+                    <img
+                      src={q.questionImage}
+                      alt="Question"
+                      className="max-h-48 rounded-md"
+                    />
+                  </div>
+                )}
+              </div>
               <RadioGroup value={answers[q.id] || ""} onValueChange={val => handleAnswer(q.id, val)} className="space-y-3">
                 {options.map((option: string, idx: number) => (
                   <div
                     key={idx}
-                    className={`flex items-center space-x-2 rounded-lg border p-3 ${answers[q.id] === option ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20" : ""}`}
+                    className={`flex items-center space-x-2 rounded-lg border p-3 ${answers[q.id] === option ? "border-green-500 bg-green-50 dark:bg-green-900/20" : ""}`}
                   >
                     <RadioGroupItem value={option} id={`option-${idx}`} />
                     <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer">
-                      {option}
+                      {option.startsWith('data:image') ? (
+                        <img
+                          src={option}
+                          alt="Option"
+                          className="max-h-16 rounded-md"
+                        />
+                      ) : (
+                        renderMathOrText({ option, math: 'math' in q ? q.math : false })
+                      )}
                     </Label>
                   </div>
                 ))}
               </RadioGroup>
+              {'answerImage' in q && answers[q.id] && q.answerImage && (
+                <div className="mt-4 flex justify-center">
+                  <img
+                    src={q.answerImage}
+                    alt="Answer"
+                    className="max-h-48 rounded-md"
+                  />
+                </div>
+              )}
             </CardContent>
             <CardFooter className="flex justify-between items-center gap-2">
               <Button variant="outline" onClick={handlePrev} disabled={currentIdx === 0}>Previous</Button>

@@ -11,6 +11,7 @@ import type {
   QuestionProcessor
 } from "./types";
 import { NLPProcessor, LLMProcessor } from "./processors";
+import { BlockConnectionManager } from "@/lib/block-connections"
 
 export class BrainInterface {
   private nlpProcessor?: QuestionProcessor;
@@ -50,9 +51,9 @@ export class BrainInterface {
       if (block.type === 'who') {
         // Handle sequence questions
         if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) {
-          const whatBlocks = this.getAllLinkedWhatBlocks(block, blocks);
-          if (whatBlocks.length >= 2) {
-            const question = this.createSequenceQuestion(block, whatBlocks, note);
+          const howBlocks = this.getAllLinkedHowBlocks(block, blocks);
+          if (howBlocks.length >= 2) {
+            const question = this.createSequenceQuestion(block, howBlocks, note);
             questions.push(question);
             byType['sequence']++;
             continue;
@@ -201,37 +202,24 @@ export class BrainInterface {
   }
 
   private getAllLinkedWhatBlocks(whoBlock: Block, blocks: Block[]): Block[] {
-    const result: Block[] = [];
-    let currentIds = whoBlock.linkedBlockIds ? [...whoBlock.linkedBlockIds] : [];
-    while (currentIds.length > 0) {
-      const nextId = currentIds[0];
-      const nextBlock = blocks.find(b => b.id === nextId && b.type === 'what');
-      if (!nextBlock) break;
-      result.push(nextBlock);
-      currentIds = nextBlock.linkedBlockIds ? [...nextBlock.linkedBlockIds] : [];
-    }
-    return result;
+    return BlockConnectionManager.getAllLinkedWhatBlocks(whoBlock, blocks)
+  }
+
+  private getAllLinkedHowBlocks(whoBlock: Block, blocks: Block[]): Block[] {
+    return BlockConnectionManager.getAllLinkedHowBlocks(whoBlock, blocks)
   }
 
   private findWhatBlock(whoBlock: Block, blocks: Block[]): Block | undefined {
-    if (Array.isArray(whoBlock.linkedBlockIds) && whoBlock.linkedBlockIds.length === 1) {
-      return blocks.find(b => b.id === whoBlock.linkedBlockIds![0] && b.type === 'what');
-    }
-    const blockIndex = blocks.findIndex(b => b.id === whoBlock.id);
-    if (blockIndex !== -1 && blockIndex < blocks.length - 1) {
-      const nextBlock = blocks[blockIndex + 1];
-      return nextBlock.type === 'what' ? nextBlock : undefined;
-    }
-    return undefined;
+    return BlockConnectionManager.findWhatBlock(whoBlock, blocks)
   }
 
-  private createSequenceQuestion(whoBlock: Block, whatBlocks: Block[], note: Note): SequenceQuestion {
+  private createSequenceQuestion(whoBlock: Block, howBlocks: Block[], note: Note): SequenceQuestion {
     return {
       id: `${whoBlock.id}-sequence`,
       type: 'sequence',
       content: whoBlock.content,
-      sequence: whatBlocks.map(b => b.content),
-      options: [...whatBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
+      sequence: howBlocks.map(b => b.content),
+      options: [...howBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
       noteId: note.id,
       noteTitle: note.title
     };

@@ -15,6 +15,8 @@ import { DndContext, closestCenter } from "@dnd-kit/core";
 import { arrayMove, SortableContext, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from '@dnd-kit/utilities';
 import { db } from "@/lib/db"
+import { BlockConnectionManager } from "@/lib/block-connections"
+import { generateQuizQuestions } from '@/lib/question-generator'
 
 interface QuizViewProps {
   note?: Note
@@ -23,18 +25,31 @@ interface QuizViewProps {
   onComplete?: (noteId: string, score: number, total: number) => void
 }
 
-interface QuizQuestion {
-  question: string
-  answer: string
-  options: string[]
-  questionImage?: string
-  answerImage?: string
-  noteId: string
-  noteTitle: string
-  math?: boolean
+interface MultipleChoiceQuizQuestion {
+  type: "multiple-choice";
+  question: string;
+  answer: string;
+  options: string[];
+  questionImage?: string;
+  answerImage?: string;
+  noteId: string;
+  noteTitle: string;
+  math?: boolean;
 }
 
-// Extend QuizQuestion for sequence type
+interface TrueFalseQuizQuestion {
+  type: "true-false";
+  question: string;
+  statement: string;
+  answer: string; // "True" or "False"
+  options: string[];
+  questionImage?: string;
+  answerImage?: string;
+  noteId: string;
+  noteTitle: string;
+  math?: boolean;
+}
+
 interface SequenceQuizQuestion {
   type: "sequence";
   question: string;
@@ -44,11 +59,7 @@ interface SequenceQuizQuestion {
   noteTitle: string;
 }
 
-// Update QuizQuestion to allow sequence type
-// @ts-ignore
-// eslint-disable-next-line
-// (for type safety, you may want to use a union type in a real refactor)
-type AnyQuizQuestion = QuizQuestion | SequenceQuizQuestion;
+type AnyQuizQuestion = MultipleChoiceQuizQuestion | TrueFalseQuizQuestion | SequenceQuizQuestion;
 
 // Helper to render text or math
 function renderMathOrText(block: any) {
@@ -61,18 +72,32 @@ function renderMathOrText(block: any) {
   return text;
 }
 
-// Helper to recursively collect all linked WHAT blocks in order
-function getAllLinkedWhatBlocks(whoBlock: Block, allBlocks: Block[]): Block[] {
-  const result: Block[] = [];
-  let currentIds = whoBlock.linkedBlockIds ? [...whoBlock.linkedBlockIds] : [];
-  while (currentIds.length > 0) {
-    const nextId = currentIds[0];
-    const nextBlock = allBlocks.find(b => b.id === nextId && b.type === "what");
-    if (!nextBlock) break;
-    result.push(nextBlock);
-    currentIds = nextBlock.linkedBlockIds ? [...nextBlock.linkedBlockIds] : [];
+// Helper to get ordered HOW blocks in the same group as a WHO block
+function getOrderedHowBlocksForWho(whoBlock: Block, allBlocks: Block[]): Block[] {
+  // Use the same robust group traversal as the editor
+  const visited = new Set<string>();
+  function traverse(b: Block) {
+    if (!b || visited.has(b.id)) return;
+    visited.add(b.id);
+    // Forward
+    (b.linkedBlockIds || []).forEach(id => {
+      const next = allBlocks.find(x => x.id === id);
+      if (next) traverse(next);
+    });
+    // Backward
+    allBlocks.forEach(x => {
+      if (x.linkedBlockIds?.includes(b.id)) traverse(x);
+    });
   }
-  return result;
+  traverse(whoBlock);
+
+  // Get all blocks in the group
+  const groupBlocks = allBlocks.filter(b => visited.has(b.id));
+
+  // Filter HOW blocks and sort by their order in allBlocks (UI order)
+  return groupBlocks
+    .filter(b => b.type === "how")
+    .sort((a, b) => allBlocks.indexOf(a) - allBlocks.indexOf(b));
 }
 
 export default function QuizView({ note, notes, folderName, onComplete }: QuizViewProps) {
@@ -101,155 +126,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     console.log(`Quiz view - Group mode: ${isGroupMode}, Notes count: ${notes?.length || 0}`)
 
     // Generate quiz questions from who/what blocks
-    const quizQuestions: AnyQuizQuestion[] = []
-
-    // Collect all unique 'what' blocks from the provided notes (for regular questions only)
-    let whatBlocks: string[] = []
-    let hasTrueFalseQuestions = false;
-    if (notes) {
-      notes.forEach((noteItem) => {
-        noteItem.blocks.forEach((block) => {
-          if (block.type === "what" && block.content && block.content.trim() !== "") {
-            // Only count as regular WHAT block if not a true/false block
-            if (!(block as any).truthState) {
-              whatBlocks.push(block.content.trim())
-            }
-          }
-          // Check for any true/false blocks
-          if (block.type === "what" && (block as any).truthState) {
-            hasTrueFalseQuestions = true;
-          }
-        })
-      })
-    } else if (note) {
-      note.blocks.forEach((block) => {
-        if (block.type === "what" && block.content && block.content.trim() !== "") {
-          if (!(block as any).truthState) {
-            whatBlocks.push(block.content.trim())
-          }
-        }
-        if (block.type === "what" && (block as any).truthState) {
-          hasTrueFalseQuestions = true;
-        }
-      })
-    }
-    // Remove duplicates
-    whatBlocks = Array.from(new Set(whatBlocks))
-
-    function addQuizQuestionsFromBlocks(blocks: Block[], noteId: string, noteTitle: string, noteObj: Note) {
-      blocks.forEach((block) => {
-        // Sequence mode: who with 2+ linked what blocks (chain-aware)
-        if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) {
-          const whatBlocks = getAllLinkedWhatBlocks(block, blocks);
-          if (whatBlocks.length >= 2) {
-            quizQuestions.push({
-              type: "sequence",
-              question: block.content,
-              sequence: whatBlocks.map(b => b.content),
-              options: [...whatBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
-              noteId,
-              noteTitle,
-            });
-            return; // Do not create multiple choice for this who block
-          }
-        }
-        // True/False questions: only WHO as question, WHAT as statement, user picks True/False
-        if (block.type === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-          const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
-          if (whatBlock && whatBlock.truthState) {
-            // Only use the statement, not the answer, in the question
-            const statement = whatBlock.originalContent || whatBlock.content;
-            quizQuestions.push({
-              question: `${block.content}`,
-              answer: whatBlock.truthState === "true" ? "True" : "False",
-              options: ["True", "False"].sort(() => Math.random() - 0.5),
-              questionImage: block.image,
-              answerImage: whatBlock.image,
-              noteId,
-              noteTitle,
-              math: whatBlock.math === true,
-            });
-            return; // Do not generate regular questions for this pair
-          }
-        }
-        // Existing WHO/WHAT logic
-        if (block.type === "who") {
-          // New structure: Check for linkedBlockIds array
-          if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-            const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
-            if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "") {
-              // Only add regular question if not a true/false block
-              if (!whatBlock.truthState) {
-                // Create a question from the "what" asking about the "who"
-                quizQuestions.push({
-                  question: `${whatBlock.content.toLowerCase()}`,
-                  answer: block.content,
-                  options: generateOptions(block.content, [noteObj], "who"),
-                  questionImage: block.image,
-                  answerImage: whatBlock.image,
-                  noteId,
-                  noteTitle,
-                  math: whatBlock.math === true,
-                })
-                // Create a question from the "who" asking about the "what"
-                quizQuestions.push({
-                  question: `${block.content}`,
-                  answer: whatBlock.content,
-                  options: generateOptions(whatBlock.content, [noteObj], "what"),
-                  questionImage: block.image,
-                  answerImage: whatBlock.image,
-                  noteId,
-                  noteTitle,
-                  math: block.math === true,
-                })
-              }
-            }
-          }
-          // Old structure: Look for adjacent WHAT blocks
-          else {
-            const blockIndex = blocks.findIndex(b => b.id === block.id)
-            if (blockIndex !== -1 && blockIndex < blocks.length - 1) {
-              const whatBlock = blocks[blockIndex + 1]
-              if (whatBlock.type === "what" && whatBlock.content && whatBlock.content.trim() !== "") {
-                // Only add regular question if not a true/false block
-                if (!whatBlock.truthState) {
-                  // Create a question from the "what" asking about the "who"
-                  quizQuestions.push({
-                    question: `${whatBlock.content.toLowerCase()}`,
-                    answer: block.content,
-                    options: generateOptions(block.content, [noteObj], "who"),
-                    questionImage: block.image,
-                    answerImage: whatBlock.image,
-                    noteId,
-                    noteTitle,
-                    math: whatBlock.math === true,
-                  })
-                  // Create a question from the "who" asking about the "what"
-                  quizQuestions.push({
-                    question: `${block.content}`,
-                    answer: whatBlock.content,
-                    options: generateOptions(whatBlock.content, [noteObj], "what"),
-                    questionImage: block.image,
-                    answerImage: whatBlock.image,
-                    noteId,
-                    noteTitle,
-                    math: block.math === true,
-                  })
-                }
-              }
-            }
-          }
-        }
-      })
-    }
-
-    if (note) {
-      addQuizQuestionsFromBlocks(note.blocks, note.id, note.title, note!)
-    } else if (notes) {
-      notes.forEach((noteItem) => {
-        addQuizQuestionsFromBlocks(noteItem.blocks, noteItem.id, noteItem.title, noteItem)
-      })
-    }
+    const quizQuestions = generateQuizQuestions(notes ? notes : note ? [note] : []);
 
     console.log(`Generated ${quizQuestions.length} quiz questions`)
     // If there are no quiz questions, do not start the quiz
@@ -497,7 +374,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
             {('type' in questions[currentIndex]) && questions[currentIndex].type === "sequence" ? (
               <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 mb-6 max-w-7xl mx-auto flex flex-col" style={{ height: '500px' }}>
                 <div className="flex justify-between items-start mb-4">
-                  <h2 className="text-xl font-bold">{(questions[currentIndex] as SequenceQuizQuestion).question}</h2>
+                  <h2 className="text-xl font-bold">{questions[currentIndex].question}</h2>
                   {isGroupMode && (
                     <Badge variant="outline" className="ml-2">
                       {questions[currentIndex].noteTitle}
@@ -606,7 +483,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
                       <div
                         key={index}
                         className={`flex items-center space-x-2 rounded-lg border p-3 ${isAnswered
-                          ? option === (questions[currentIndex] as QuizQuestion).answer
+                          ? option === (questions[currentIndex] as MultipleChoiceQuizQuestion).answer
                             ? "border-green-500 bg-green-50 dark:bg-green-900/20"
                             : option === selectedAnswer
                               ? "border-red-500 bg-red-50 dark:bg-red-900/20"
@@ -626,10 +503,10 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
                             renderMathOrText({ option, math: 'math' in questions[currentIndex] ? questions[currentIndex].math : false })
                           )}
                         </Label>
-                        {isAnswered && option === (questions[currentIndex] as QuizQuestion).answer && (
+                        {isAnswered && option === (questions[currentIndex] as MultipleChoiceQuizQuestion).answer && (
                           <Check className="w-5 h-5 text-green-500" />
                         )}
-                        {isAnswered && option === selectedAnswer && option !== (questions[currentIndex] as QuizQuestion).answer && (
+                        {isAnswered && option === selectedAnswer && option !== (questions[currentIndex] as MultipleChoiceQuizQuestion).answer && (
                           <X className="w-5 h-5 text-red-500" />
                         )}
                       </div>

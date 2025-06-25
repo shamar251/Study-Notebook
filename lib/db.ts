@@ -10,6 +10,7 @@ export interface Note {
   lastStudied?: number;
   order: number;
   deletedAt?: number;
+  migratedToHow?: boolean;
   studyStats?: {
     quizAttempts: number;
     quizCorrect: number;
@@ -19,14 +20,27 @@ export interface Note {
 
 export interface Block {
   id: string;
-  type: "who" | "what" | "note" | "image" | "video" | "code";
+  folderId?: number;
+  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how";
   content: string;
+  data?: any;
+  createdAt: Date;
+  lastModified: Date;
+  sortOrder: number;
   linkedBlockIds?: string[];
   language?: string;
   image?: string;
   math?: boolean;
   truthState?: "true" | "false";
   originalContent?: string;
+  sequenceMode?: "enabled" | "disabled" | "auto";
+  sequenceStart?: boolean;
+  migratedToHow?: boolean;
+  location?: {
+    type: "text" | "coords"
+    address?: string
+    coordinates?: { lat: number; lon: number }
+  }
 }
 
 export interface Folder {

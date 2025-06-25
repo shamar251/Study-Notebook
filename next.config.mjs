@@ -15,7 +15,7 @@ const nextConfig = {
 // Only apply these settings when building for production (Electron)
 if (process.env.NODE_ENV === 'production') {
   nextConfig.output = 'export';
-  nextConfig.assetPrefix = './';
+  nextConfig.assetPrefix = '/';
 }
 
 export default nextConfig

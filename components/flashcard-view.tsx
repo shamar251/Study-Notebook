@@ -10,6 +10,8 @@ import type { Note } from "@/components/note-app"
 import 'katex/dist/katex.min.css'
 import { InlineMath } from 'react-katex'
 import type { Block } from "@/lib/db"
+import { BlockConnectionManager } from "@/lib/block-connections"
+import { getConnectedGroup } from "@/hooks/use-block-connections"
 
 interface FlashcardViewProps {
   note?: Note
@@ -56,15 +58,15 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
 
     function addFlashcardsFromBlocks(blocks: Block[], noteId: string, noteTitle: string) {
       blocks.forEach((block) => {
-        // Handle both old and new data structures
         if (block.type === "who") {
-          // Exclude sequence-based WHO blocks (2+ linked WHATs)
-          if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length >= 2) return;
-          // New structure: Check for linkedBlockIds array
-          if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-            const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what")
-            // Exclude WHAT blocks that are part of a sequence (have linkedBlockIds)
-            if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "" && (!Array.isArray(whatBlock.linkedBlockIds) || whatBlock.linkedBlockIds.length === 0)) {
+          // Prefer explicit links if present
+          const linkedWhatBlocks = Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0
+            ? block.linkedBlockIds
+              .map(id => blocks.find(b => b.id === id && b.type === "what" && b.content && b.content.trim() !== ""))
+              .filter(Boolean) as Block[]
+            : [];
+          if (linkedWhatBlocks.length > 0) {
+            linkedWhatBlocks.forEach((whatBlock) => {
               cards.push({
                 front: block.content,
                 back: whatBlock.content,
@@ -75,35 +77,33 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
                 math: block.math === true,
                 whatMath: whatBlock.math
               })
-            }
-          }
-          // Old structure: Look for adjacent WHAT blocks
-          else {
-            const blockIndex = blocks.findIndex(b => b.id === block.id)
-            if (blockIndex !== -1 && blockIndex < blocks.length - 1) {
-              const nextBlock = blocks[blockIndex + 1]
-              // Exclude WHAT blocks that are part of a sequence (have linkedBlockIds)
-              if (nextBlock.type === "what" && nextBlock.content && nextBlock.content.trim() !== "" && (!Array.isArray(nextBlock.linkedBlockIds) || nextBlock.linkedBlockIds.length === 0)) {
-                cards.push({
-                  front: block.content,
-                  back: nextBlock.content,
-                  frontImage: block.image,
-                  backImage: nextBlock.image,
-                  noteId,
-                  noteTitle,
-                  math: block.math === true,
-                  whatMath: nextBlock.math
-                })
-              }
-            }
+            })
+          } else {
+            // Fallback: group-based logic
+            const groupBlocks = getConnectedGroup(block, blocks)
+            const whatBlocks = groupBlocks.filter(b => b.type === "what" && b.content && b.content.trim() !== "")
+            whatBlocks.forEach((whatBlock) => {
+              cards.push({
+                front: block.content,
+                back: whatBlock.content,
+                frontImage: block.image,
+                backImage: whatBlock.image,
+                noteId,
+                noteTitle,
+                math: block.math === true,
+                whatMath: whatBlock.math
+              })
+            })
           }
         }
       })
     }
 
     if (note) {
+      console.log("[FlashcardView] note.blocks:", note.blocks)
       addFlashcardsFromBlocks(note.blocks, note.id, note.title)
     } else if (notes) {
+      console.log("[FlashcardView] notes (all blocks):", notes.map(n => ({ id: n.id, title: n.title, blocks: n.blocks })))
       notes.forEach((noteItem) => {
         addFlashcardsFromBlocks(noteItem.blocks, noteItem.id, noteItem.title)
       })
