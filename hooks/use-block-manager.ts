@@ -71,17 +71,62 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
     const blockToDelete = blocks.find((block) => block.id === id)
     if (!blockToDelete) return
 
+    // Remove all links to this block from all other blocks
+    const cleanedBlocks = blocks
+      .filter((block) => block.id !== id)
+      .map((block) => {
+        if (block.linkedBlockIds?.includes(id)) {
+          return {
+            ...block,
+            linkedBlockIds: block.linkedBlockIds.filter((linkedId) => linkedId !== id)
+          }
+        }
+        return block
+      })
+
+    if (blockToDelete.type === "where") {
+      // Find all where-ref blocks that point to this where block
+      const whereRefs = cleanedBlocks.filter(b => b.type === 'where-ref' && b.whereBlockId === id);
+      if (whereRefs.length > 0) {
+        // Promote the first where-ref to a where block
+        const promoted = { ...whereRefs[0], type: 'where' as const, whereBlockId: undefined };
+        // Update all other where-refs to point to the new id
+        const newBlocks = cleanedBlocks
+          .map(b => {
+            if (b.id === promoted.id) {
+              // Promote this where-ref to a where block, copying content from the deleted where block
+              const { whereBlockId, ...rest } = b;
+              return {
+                ...rest,
+                type: 'where' as const,
+                content: blockToDelete.content, // copy content from the deleted where block
+              };
+            }
+            if (b.type === 'where-ref' && b.whereBlockId === id) {
+              // Update other refs to point to the promoted block
+              return { ...b, whereBlockId: promoted.id };
+            }
+            return b;
+          });
+        setBlocks(newBlocks);
+        return;
+      } else {
+        setBlocks(cleanedBlocks);
+        return;
+      }
+    }
+
     if (blockToDelete.type === "who" && blockToDelete.linkedBlockIds?.length) {
-      setBlocks(blocks.filter((block) =>
+      setBlocks(cleanedBlocks.filter((block) =>
         block.id !== id && !blockToDelete.linkedBlockIds?.includes(block.id)
       ))
     } else if (blockToDelete.type === "what") {
-      const linkedWhoBlocks = blocks.filter((block) =>
+      const linkedWhoBlocks = cleanedBlocks.filter((block) =>
         block.linkedBlockIds?.includes(blockToDelete.id)
       )
       if (linkedWhoBlocks.length > 0) {
         setBlocks(
-          blocks
+          cleanedBlocks
             .map((block) => {
               if (block.linkedBlockIds?.includes(blockToDelete.id)) {
                 return {
@@ -94,10 +139,10 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
             .filter((block) => block.id !== blockToDelete.id)
         )
       } else {
-        setBlocks(blocks.filter((block) => block.id !== id))
+        setBlocks(cleanedBlocks.filter((block) => block.id !== id))
       }
     } else {
-      setBlocks(blocks.filter((block) => block.id !== id))
+      setBlocks(cleanedBlocks.filter((block) => block.id !== id))
     }
   }, [blocks, setBlocks])
 
@@ -302,10 +347,20 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
     let newBlock: Block;
     let updatedBlocks = [...blocks];
 
+    // --- FIX: If afterBlock is a where-ref, resolve to the referenced where block ---
+    let effectiveAfterBlockId = afterBlockId;
+    if (afterBlockId) {
+      const afterBlock = blocks.find(b => b.id === afterBlockId);
+      if (afterBlock && afterBlock.type === "where-ref" && afterBlock.whereBlockId) {
+        // Instead of linking to the where-ref, link to the referenced where block
+        effectiveAfterBlockId = afterBlock.whereBlockId;
+      }
+    }
+
     if (type === "how") {
       // If afterBlockId is provided, use its group
-      if (afterBlockId) {
-        const afterBlock = blocks.find(b => b.id === afterBlockId);
+      if (effectiveAfterBlockId) {
+        const afterBlock = blocks.find(b => b.id === effectiveAfterBlockId);
         if (!afterBlock) return;
         const group = getConnectedGroup(afterBlock, blocks);
         // Find all HOW blocks in this group
@@ -339,7 +394,7 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
           return newBlock;
         } else {
           // No HOW block in group, insert after afterBlockId in main array
-          const idx = blocks.findIndex(b => b.id === afterBlockId);
+          const idx = blocks.findIndex(b => b.id === effectiveAfterBlockId);
           if (idx === -1) return;
           newBlock = {
             id: `block-${Date.now()}`,
@@ -357,7 +412,7 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
           ];
           // Link the new HOW block to the selected block
           updatedBlocks = updatedBlocks.map(b =>
-            b.id === afterBlockId
+            b.id === effectiveAfterBlockId
               ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
               : b
           );
@@ -397,13 +452,13 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
       }
     }
 
-    if (afterBlockId) {
-      const afterBlock = blocks.find(b => b.id === afterBlockId);
+    if (effectiveAfterBlockId) {
+      const afterBlock = blocks.find(b => b.id === effectiveAfterBlockId);
       if (!afterBlock) return;
       const group = getConnectedGroup(afterBlock, blocks);
       const groupIds = group.map(b => b.id);
-      const idxInGroup = groupIds.indexOf(afterBlockId);
-      const idxInBlocks = blocks.findIndex(b => b.id === afterBlockId);
+      const idxInGroup = groupIds.indexOf(effectiveAfterBlockId);
+      const idxInBlocks = blocks.findIndex(b => b.id === effectiveAfterBlockId);
       if (idxInGroup === -1 || idxInBlocks === -1) return;
 
       // If afterBlock is a HOW block and is part of a HOW chain, insert at end of group
@@ -454,7 +509,7 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
         ...blocks.slice(idxInBlocks + 1)
       ];
       updatedBlocks = updatedBlocks.map(b =>
-        b.id === afterBlockId
+        b.id === effectiveAfterBlockId
           ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
           : b
       );

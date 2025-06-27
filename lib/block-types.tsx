@@ -2,7 +2,7 @@ import React from "react"
 import { FileText, ImageIcon, Video, Code, MapPin, ArrowRight } from "lucide-react"
 import type { Block } from "@/lib/db"
 
-export const BLOCK_TYPES = ["who", "what", "note", "image", "video", "code", "where", "how"] as const
+export const BLOCK_TYPES = ["who", "what", "note", "image", "video", "code", "where", "how", "where-ref"] as const
 export type BlockType = (typeof BLOCK_TYPES)[number]
 
 export const BLOCK_TYPE_COLORS: Record<Block["type"], string> = {
@@ -14,6 +14,7 @@ export const BLOCK_TYPE_COLORS: Record<Block["type"], string> = {
   code: "border-gray-500 bg-gray-50 dark:bg-gray-700/30",
   where: "border-teal-500 bg-teal-50 dark:bg-teal-900/10",
   how: "border-orange-500 bg-orange-50 dark:bg-orange-900/10",
+  'where-ref': "border-teal-500 bg-teal-50 dark:bg-teal-900/10",
 }
 
 export const BLOCK_TYPE_LABELS: Record<Block["type"], string> = {
@@ -25,6 +26,7 @@ export const BLOCK_TYPE_LABELS: Record<Block["type"], string> = {
   code: "CODE",
   where: "WHERE",
   how: "HOW",
+  'where-ref': "WHERE",
 }
 
 export const BLOCK_TYPE_ICONS: Record<Block["type"], React.ReactNode> = {
@@ -36,6 +38,7 @@ export const BLOCK_TYPE_ICONS: Record<Block["type"], React.ReactNode> = {
   code: <Code className="w-4 h-4" />,
   where: <MapPin className="w-4 h-4" />,
   how: <ArrowRight className="w-4 h-4" />,
+  'where-ref': <MapPin className="w-4 h-4" />,
 }
 
 export const BLOCK_TYPE_PLACEHOLDERS: Record<Block["type"], string> = {
@@ -47,6 +50,7 @@ export const BLOCK_TYPE_PLACEHOLDERS: Record<Block["type"], string> = {
   code: "Enter code here... (or paste an image)",
   where: "Enter a location, address, or coordinates...",
   how: "Enter a step or process...",
+  'where-ref': "Select a location...",
 }
 
 export const BLOCK_TYPE_BADGE_CLASSES: Record<Block["type"], string> = {
@@ -58,4 +62,5 @@ export const BLOCK_TYPE_BADGE_CLASSES: Record<Block["type"], string> = {
   code: "bg-gray-100 dark:bg-gray-700",
   where: "bg-teal-100 dark:bg-teal-900/30",
   how: "bg-orange-100 dark:bg-orange-900/30",
+  'where-ref': "bg-teal-100 dark:bg-teal-900/30",
 } 

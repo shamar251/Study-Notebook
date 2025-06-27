@@ -60,6 +60,18 @@ export class BrainInterface {
           }
         }
 
+        // Handle single HOW block as WHAT block for questions
+        if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0) {
+          const howBlocks = this.getAllLinkedHowBlocks(block, blocks);
+          if (howBlocks.length === 1) {
+            const singleHowBlock = howBlocks[0];
+            const mcQuestions = this.createMultipleChoiceQuestions(block, singleHowBlock, note);
+            questions.push(...mcQuestions);
+            byType['multiple-choice'] += mcQuestions.length;
+            continue;
+          }
+        }
+
         // Handle true/false questions
         if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
           const whatBlock = blocks.find(b => b.id === block.linkedBlockIds![0] && b.type === 'what');
@@ -214,12 +226,13 @@ export class BrainInterface {
   }
 
   private createSequenceQuestion(whoBlock: Block, howBlocks: Block[], note: Note): SequenceQuestion {
+    const howContents = howBlocks.map(b => b.content).filter((c): c is string => Boolean(c));
     return {
       id: `${whoBlock.id}-sequence`,
       type: 'sequence',
-      content: whoBlock.content,
-      sequence: howBlocks.map(b => b.content),
-      options: [...howBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
+      content: whoBlock.content || '',
+      sequence: howContents,
+      options: [...howContents].sort(() => Math.random() - 0.5),
       noteId: note.id,
       noteTitle: note.title
     };
@@ -229,9 +242,9 @@ export class BrainInterface {
     return {
       id: `${whoBlock.id}-tf`,
       type: 'true-false',
-      content: whoBlock.content,
-      statement: whatBlock.content,
-      answer: whatBlock.truthState === 'true' ? 'True' : 'False',
+      content: whoBlock.content || '',
+      statement: whatBlock.content || '',
+      answer: (whatBlock as any).truthState === 'true' ? 'True' : 'False',
       noteId: note.id,
       noteTitle: note.title
     };
@@ -244,9 +257,9 @@ export class BrainInterface {
     questions.push({
       id: `${whoBlock.id}-who`,
       type: 'multiple-choice',
-      content: whoBlock.content,
-      answer: whatBlock.content,
-      options: this.generateOptions(whatBlock.content, note.blocks, 'what'),
+      content: whoBlock.content || '',
+      answer: whatBlock.content || '',
+      options: this.generateOptions(whatBlock.content || '', note.blocks, 'what'),
       noteId: note.id,
       noteTitle: note.title,
       questionImage: whoBlock.image,
@@ -258,9 +271,9 @@ export class BrainInterface {
     questions.push({
       id: `${whoBlock.id}-what`,
       type: 'multiple-choice',
-      content: whatBlock.content.toLowerCase(),
-      answer: whoBlock.content,
-      options: this.generateOptions(whoBlock.content, note.blocks, 'who'),
+      content: (whatBlock.content || '').toLowerCase(),
+      answer: whoBlock.content || '',
+      options: this.generateOptions(whoBlock.content || '', note.blocks, 'who'),
       noteId: note.id,
       noteTitle: note.title,
       questionImage: whoBlock.image,
@@ -284,7 +297,8 @@ export class BrainInterface {
         if (blockType === 'who' && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length >= 2) return false;
         return block.content !== correctAnswer;
       })
-      .map(block => block.content);
+      .map(block => block.content)
+      .filter((c): c is string => Boolean(c));
 
     const shuffled = allAnswers.sort(() => Math.random() - 0.5).slice(0, 3);
     return [...shuffled, correctAnswer].sort(() => Math.random() - 0.5);

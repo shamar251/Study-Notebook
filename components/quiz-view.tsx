@@ -177,7 +177,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
           }
           // Exclude WHO blocks that are sequence-based (2+ linked WHATs)
           if (blockType === "who" && Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length >= 2) return;
-          if (block.content !== correctAnswer) {
+          if (block.content && block.content !== correctAnswer) {
             allAnswers.push(block.content)
           }
         })

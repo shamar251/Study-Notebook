@@ -14,6 +14,7 @@ const NODE_COLORS: Record<Block['type'], string> = {
   code: '#6b7280',
   where: '#14b8a6',
   how: '#f97316',
+  'where-ref': '#14b8a6',
 };
 
 // Dynamically import react-d3-tree to avoid SSR issues
@@ -32,15 +33,27 @@ function blocksToTreeData(blocks: Block[]): any {
   const blockMap = new Map(blocks.map(b => [b.id, b]));
   const linked = new Set<string>();
   blocks.forEach(b => b.linkedBlockIds?.forEach(id => linked.add(id)));
-  const roots = blocks.filter(b => !linked.has(b.id));
+  const roots = blocks.filter(b => !linked.has(b.id) && b.type !== 'where-ref');
   function buildNode(block: Block): any {
+    if (block.type === 'where-ref' && block.whereBlockId) {
+      // Do not create a node for where-ref, just use the referenced where block
+      const referenced = blockMap.get(block.whereBlockId);
+      if (referenced) return buildNode(referenced);
+      return null;
+    }
     return {
       name: BLOCK_TYPE_LABELS[block.type],
       attributes: { id: block.id, content: block.content },
       children: (block.linkedBlockIds || [])
-        .map(id => blockMap.get(id))
-        .filter(Boolean)
-        .map(child => buildNode(child!)),
+        .map(id => {
+          const child = blockMap.get(id);
+          if (child?.type === 'where-ref' && child.whereBlockId) {
+            const referenced = blockMap.get(child.whereBlockId);
+            return referenced ? buildNode(referenced) : null;
+          }
+          return child ? buildNode(child) : null;
+        })
+        .filter(Boolean),
       _block: block,
     };
   }
@@ -49,7 +62,7 @@ function blocksToTreeData(blocks: Block[]): any {
     return [{
       name: 'All Blocks',
       _virtualRoot: true,
-      children: roots.map(buildNode),
+      children: roots.map(buildNode).filter(Boolean),
     }];
   } else if (roots.length === 1) {
     return [buildNode(roots[0])];

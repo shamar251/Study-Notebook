@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useMemo, useCallback } from "react"
 import { X, FunctionSquare, Link as LinkIcon, Shuffle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -55,6 +55,8 @@ interface BlockEditorProps {
   countAllLinkedBlocksInGroup: (block: Block, blocks: Block[]) => number
   isFirstInGroup?: boolean
   isLastInGroup?: boolean
+  onDoubleClick?: (block: Block) => void
+  onSelectExistingWhereBlock?: (targetBlockId: string, referenceBlock: Block) => void
 }
 
 // Helper to determine if this block is in a linked group (any type of connection)
@@ -84,7 +86,7 @@ function isBlockInLinkedGroup(block: Block, allBlocks: Block[]): boolean {
   return visited.size > 1; // More than one block in the linked group
 }
 
-export function BlockEditor({
+export const BlockEditor = React.memo(function BlockEditor({
   block,
   index,
   blocks,
@@ -108,10 +110,75 @@ export function BlockEditor({
   groupId,
   countAllLinkedBlocksInGroup,
   isFirstInGroup,
-  isLastInGroup
+  isLastInGroup,
+  onDoubleClick,
+  onSelectExistingWhereBlock
 }: BlockEditorProps) {
 
-  const renderBlockContent = () => {
+  // Memoize expensive calculations
+  const connectionState = useMemo(() =>
+    BlockConnectionManager.getConnectionState(block, index, blocks),
+    [block, index, blocks]
+  );
+
+  const blockClass = useMemo(() =>
+    BlockConnectionManager.getBlockClasses(block, connectionState),
+    [block, connectionState]
+  );
+
+  // Memoize group calculations
+  const groupData = useMemo(() => {
+    const groupBlocks = getConnectedGroup(block, blocks).sort((a, b) => blocks.indexOf(a) - blocks.indexOf(b));
+    const groupIndex = groupBlocks.findIndex(b => b.id === block.id);
+    let borderRadiusClass = "";
+    if (groupBlocks.length === 1) {
+      borderRadiusClass = "rounded-lg";
+    } else if (groupIndex === 0) {
+      borderRadiusClass = "rounded-t-lg";
+    } else if (groupIndex === groupBlocks.length - 1) {
+      borderRadiusClass = "rounded-b-lg";
+    }
+    return { groupBlocks, groupIndex, borderRadiusClass };
+  }, [block, blocks]);
+
+  // Memoize linked group check
+  const inLinkedGroup = useMemo(() =>
+    isBlockInLinkedGroup(block, blocks),
+    [block, blocks]
+  );
+
+  const shouldStick = inLinkedGroup;
+
+  // Memoize callback functions
+  const handleUpdateBlock = useCallback((id: string, content: string, math?: boolean, location?: Block["location"]) => {
+    onUpdateBlock(id, content, math, location);
+  }, [onUpdateBlock]);
+
+  const handleUpdateBlockImmediate = useCallback(() => {
+    onUpdateBlockImmediate(block.id, !block.math);
+  }, [onUpdateBlockImmediate, block.id, block.math]);
+
+  const handleDeleteBlock = useCallback(() => {
+    onDeleteBlock(block.id);
+  }, [onDeleteBlock, block.id]);
+
+  const handleToggleTruthState = useCallback(() => {
+    onToggleTruthState(block.id);
+  }, [onToggleTruthState, block.id]);
+
+  const handleRemoveBlockImage = useCallback(() => {
+    onRemoveBlockImage(block.id);
+  }, [onRemoveBlockImage, block.id]);
+
+  const handleUpdateBlockLanguage = useCallback((language: string) => {
+    onUpdateBlockLanguage(block.id, language);
+  }, [onUpdateBlockLanguage, block.id]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
+    onPaste(e, block.id);
+  }, [onPaste, block.id]);
+
+  const renderBlockContent = useCallback(() => {
     switch (block.type) {
       case "who":
         return (
@@ -119,11 +186,11 @@ export function BlockEditor({
             <div className="flex items-center gap-2 mb-1">
               <div className="w-full min-w-[350px] md:min-w-[500px]">
                 <MathInput
-                  value={block.content}
-                  onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+                  value={block.content || ''}
+                  onChange={(value: string) => handleUpdateBlock(block.id, value, block.math)}
                   placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
                   isMathMode={block.math}
-                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+                  onPaste={handlePaste}
                 />
               </div>
             </div>
@@ -139,7 +206,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onRemoveBlockImage(block.id)}
+                    onClick={handleRemoveBlockImage}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -154,11 +221,11 @@ export function BlockEditor({
             <div className="flex items-center gap-200 mb-1">
               <div className="w-full min-w-[350px] md:min-w-[500px]">
                 <MathInput
-                  value={block.content}
-                  onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+                  value={block.content || ''}
+                  onChange={(value: string) => handleUpdateBlock(block.id, value, block.math)}
                   placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
                   isMathMode={block.math}
-                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+                  onPaste={handlePaste}
                   readOnly={block.truthState === "true" || block.truthState === "false"}
                 />
               </div>
@@ -175,7 +242,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onRemoveBlockImage(block.id)}
+                    onClick={handleRemoveBlockImage}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -188,11 +255,11 @@ export function BlockEditor({
         return (
           <div>
             <MathInput
-              value={block.content}
-              onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+              value={block.content || ''}
+              onChange={(value: string) => handleUpdateBlock(block.id, value, block.math)}
               placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
               isMathMode={block.math}
-              onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+              onPaste={handlePaste}
             />
             {block.image && (
               <div className="mt-2 relative group">
@@ -206,7 +273,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onRemoveBlockImage(block.id)}
+                    onClick={handleRemoveBlockImage}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -221,9 +288,9 @@ export function BlockEditor({
             {!block.content && (
               <Input
                 type="text"
-                value={block.content}
-                onChange={(e) => onUpdateBlock(block.id, e.target.value)}
-                onPaste={(e) => onPaste(e, block.id)}
+                value={block.content || ''}
+                onChange={(e) => handleUpdateBlock(block.id, e.target.value)}
+                onPaste={handlePaste}
                 placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
                 className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 shadow-none"
               />
@@ -240,7 +307,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onUpdateBlock(block.id, "")}
+                    onClick={() => handleUpdateBlock(block.id, "")}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -254,9 +321,9 @@ export function BlockEditor({
           <div className="space-y-2">
             <Input
               type="text"
-              value={block.content}
-              onChange={(e) => onUpdateBlock(block.id, e.target.value)}
-              onPaste={(e) => onPaste(e, block.id)}
+              value={block.content || ''}
+              onChange={(e) => handleUpdateBlock(block.id, e.target.value)}
+              onPaste={handlePaste}
               placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
               className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 shadow-none"
             />
@@ -279,7 +346,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onUpdateBlock(block.id, "")}
+                    onClick={() => handleUpdateBlock(block.id, "")}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -294,16 +361,16 @@ export function BlockEditor({
             <div className="flex items-center gap-2 mb-1">
               <Input
                 type="text"
-                value={block.language || ""}
-                onChange={(e) => onUpdateBlockLanguage(block.id, e.target.value)}
+                value={block.language || ''}
+                onChange={(e) => handleUpdateBlockLanguage(e.target.value)}
                 placeholder="Language (python, javascript, etc.)"
                 className="w-40 h-7 text-xs"
               />
             </div>
             <Textarea
-              value={block.content}
-              onChange={(e) => onUpdateBlock(block.id, e.target.value)}
-              onPaste={(e) => onPaste(e, block.id)}
+              value={block.content || ''}
+              onChange={(e) => handleUpdateBlock(block.id, e.target.value)}
+              onPaste={handlePaste}
               className="min-h-[100px] resize-y font-mono text-sm border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 shadow-none"
               placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
             />
@@ -319,7 +386,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onUpdateBlock(block.id, "")}
+                    onClick={() => handleUpdateBlock(block.id, "")}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -329,18 +396,33 @@ export function BlockEditor({
           </div>
         )
       case "where": {
-        const handleUpdate = (
+        const handleUpdate = useCallback((
           id: string,
           content: string,
           location?: Block["location"]
         ) => {
-          onUpdateBlock(id, content, undefined, location)
-        }
+          handleUpdateBlock(id, content, undefined, location)
+        }, [handleUpdateBlock]);
+
         return (
           <WhereBlockEditor
             block={block}
             onUpdateBlock={handleUpdate}
             getExistingWhereBlocks={getExistingWhereBlocks}
+            onSelectExistingWhereBlock={onSelectExistingWhereBlock || (() => { })}
+          />
+        )
+      }
+      case "where-ref": {
+        // Find the referenced where block
+        const referencedWhereBlock = blocks.find(b => b.id === block.whereBlockId && b.type === "where");
+        return (
+          <WhereBlockEditor
+            block={block}
+            onUpdateBlock={() => { }}
+            getExistingWhereBlocks={getExistingWhereBlocks}
+            onSelectExistingWhereBlock={() => { }}
+            referencedWhereBlock={referencedWhereBlock}
           />
         )
       }
@@ -350,11 +432,11 @@ export function BlockEditor({
             <div className="flex items-center gap-2 mb-1">
               <div className="w-full min-w-[350px] md:min-w-[500px]">
                 <MathInput
-                  value={block.content}
-                  onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
+                  value={block.content || ''}
+                  onChange={(value: string) => handleUpdateBlock(block.id, value, block.math)}
                   placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
                   isMathMode={block.math}
-                  onPaste={(e: React.ClipboardEvent<HTMLTextAreaElement>) => onPaste(e, block.id)}
+                  onPaste={handlePaste}
                 />
               </div>
             </div>
@@ -370,7 +452,7 @@ export function BlockEditor({
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => onRemoveBlockImage(block.id)}
+                    onClick={handleRemoveBlockImage}
                   >
                     <X className="w-4 h-4" />
                   </Button>
@@ -382,33 +464,12 @@ export function BlockEditor({
       default:
         return null
     }
-  }
-
-  // Use centralized connection logic instead of duplicating it
-  const connectionState = BlockConnectionManager.getConnectionState(block, index, blocks)
-  const blockClass = BlockConnectionManager.getBlockClasses(block, connectionState)
-
-  // Find all blocks in the same linked group as this block, sorted by their order in the note
-  const groupBlocks = getConnectedGroup(block, blocks).sort((a, b) => blocks.indexOf(a) - blocks.indexOf(b));
-  const groupIndex = groupBlocks.findIndex(b => b.id === block.id);
-  let borderRadiusClass = "";
-  if (groupBlocks.length === 1) {
-    borderRadiusClass = "rounded-lg";
-  } else if (groupIndex === 0) {
-    borderRadiusClass = "rounded-t-lg";
-  } else if (groupIndex === groupBlocks.length - 1) {
-    borderRadiusClass = "rounded-b-lg";
-  }
-
-  // Determine if this block is in a linked group
-  const inLinkedGroup = isBlockInLinkedGroup(block, blocks);
-
-  // Check if this block is connected to make it stick to others
-  const shouldStick = inLinkedGroup;
+  }, [block, handleUpdateBlock, handleUpdateBlockLanguage, handleRemoveBlockImage, handlePaste, getExistingWhereBlocks]);
 
   return (
     <div
-      className={`group relative border-l-4 ${BLOCK_TYPE_COLORS[block.type]} pl-3 ${shouldStick ? "py-0.5 border-b-0" : "py-2"} hover:bg-gray-50 dark:hover:bg-gray-800/50 ${borderRadiusClass}`}
+      className={`group relative border-l-4 ${BLOCK_TYPE_COLORS[block.type]} pl-3 ${shouldStick ? "py-0.5 border-b-0" : "py-2"} hover:bg-gray-50 dark:hover:bg-gray-800/50 ${groupData.borderRadiusClass}`}
+      onDoubleClick={() => onDoubleClick && onDoubleClick(block)}
     >
       <div className="flex items-start gap-2">
         <div className="flex-none w-8 text-right text-xs text-gray-500 mt-1 font-mono">[{index + 1}]</div>
@@ -441,7 +502,7 @@ export function BlockEditor({
             )}
             {(block.type === "who" || block.type === "what" || block.type === "note") && (
               <button
-                onClick={() => onUpdateBlockImmediate(block.id, !block.math)}
+                onClick={() => handleUpdateBlockImmediate()}
                 title={block.math ? "Math mode enabled" : "Enable math mode"}
                 className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors
                   ${block.type === "who"
@@ -479,7 +540,7 @@ export function BlockEditor({
             )}
             {block.type === "what" && (
               <button
-                onClick={() => onToggleTruthState(block.id)}
+                onClick={() => handleToggleTruthState()}
                 title={
                   block.truthState === "true"
                     ? "True statement (click to set False)"
@@ -508,7 +569,7 @@ export function BlockEditor({
               variant="ghost"
               size="icon"
               className="h-7 w-7 opacity-0 group-hover:opacity-100"
-              onClick={() => onDeleteBlock(block.id)}
+              onClick={() => handleDeleteBlock()}
             >
               <X className="w-4 h-4" />
             </Button>
@@ -517,4 +578,4 @@ export function BlockEditor({
       </div>
     </div>
   )
-} 
+}); 

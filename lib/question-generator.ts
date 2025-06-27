@@ -65,6 +65,8 @@ function getOrderedHowBlocksForWho(whoBlock: Block, allBlocks: Block[]): Block[]
 export function generateQuizQuestions(notes: any[]): AnyQuizQuestion[] {
   const quizQuestions: AnyQuizQuestion[] = [];
   const allBlocks = notes.flatMap(note => note.blocks);
+
+  // Helper to get all groups
   const groups: Block[][] = [];
   const visitedGlobal = new Set<string>();
   for (const block of allBlocks) {
@@ -88,108 +90,119 @@ export function generateQuizQuestions(notes: any[]): AnyQuizQuestion[] {
     }
   }
 
-  function addQuizQuestionsFromBlocks(blocks: Block[], noteId: string, noteTitle: string, noteObj: any) {
-    const whoBlocks = blocks.filter(b => b.type === 'who');
-    for (const whoBlock of whoBlocks) {
-      const visited = new Set<string>();
-      function traverse(b: Block) {
-        if (!b || visited.has(b.id)) return;
-        visited.add(b.id);
-        (b.linkedBlockIds || []).forEach(id => {
-          const next = blocks.find(x => x.id === id);
-          if (next) traverse(next);
-        });
-        blocks.forEach(x => {
-          if (x.linkedBlockIds?.includes(b.id)) traverse(x);
-        });
-      }
-      traverse(whoBlock);
-      const groupBlocks = blocks.filter(b => visited.has(b.id));
-      const groupWhatBlocks = groupBlocks.filter(b => b.type === 'what');
-      // Sequence question: if WHO block has 2 or more linked HOW blocks
-      const howBlocks = getOrderedHowBlocksForWho(whoBlock, blocks);
-      if (howBlocks.length >= 2) {
-        quizQuestions.push({
-          id: whoBlock.id + '-sequence',
-          type: 'sequence',
-          question: whoBlock.content,
-          sequence: howBlocks.map(b => b.content),
-          options: [...howBlocks.map(b => b.content)].sort(() => Math.random() - 0.5),
-          noteId,
-          noteTitle,
-        });
-      }
-      for (const whatBlock of groupWhatBlocks) {
-        if ((whatBlock as any).truthState) {
+  // For each who block, generate questions for direct links only
+  allBlocks.filter(b => b.type === 'who').forEach(whoBlock => {
+    // Find the group for this who block
+    const group = groups.find(g => g.some(b => b.id === whoBlock.id)) || [];
+    const groupWhatBlocks = group.filter(b => b.type === 'what');
+    const groupHowBlocks = group.filter(b => b.type === 'how');
+    const groupWhatIds = new Set(groupWhatBlocks.map(b => b.id));
+    // --- NEW LOGIC: If only one HOW block in the group, treat it as a WHAT block ---
+    if (groupHowBlocks.length === 1) {
+      const singleHowBlock = groupHowBlocks[0];
+      // Only treat as WHAT if not already a WHAT and has content
+      if (singleHowBlock && singleHowBlock.content) {
+        // True/False: if the how block has a truthState
+        if ((singleHowBlock as any).truthState) {
           quizQuestions.push({
-            id: `${whoBlock.id}-${whatBlock.id}-tf`,
+            id: `${whoBlock.id}-${singleHowBlock.id}-tf`,
             type: 'true-false',
-            question: whoBlock.content,
-            statement: whatBlock.content,
-            answer: (whatBlock as any).truthState === 'true' ? 'True' : 'False',
+            question: whoBlock.content || '',
+            statement: singleHowBlock.content || '',
+            answer: (singleHowBlock as any).truthState === 'true' ? 'True' : 'False',
             options: ['True', 'False'].sort(() => Math.random() - 0.5),
             questionImage: whoBlock.image,
-            answerImage: whatBlock.image,
-            noteId,
-            noteTitle,
+            answerImage: singleHowBlock.image,
+            noteId: whoBlock.noteId || '',
+            noteTitle: whoBlock.noteTitle || '',
             math: whoBlock.math,
           });
         } else {
-          const allBlocks = (notes || [noteObj]).flatMap(n => n.blocks);
-          const groups: Block[][] = [];
-          const visitedGlobal = new Set<string>();
-          for (const block of allBlocks) {
-            if (visitedGlobal.has(block.id)) continue;
-            const visited = new Set<string>();
-            function traverseGroup(b: Block) {
-              if (!b || visited.has(b.id)) return;
-              visited.add(b.id);
-              (b.linkedBlockIds || []).forEach(id => {
-                const next = allBlocks.find(x => x.id === id);
-                if (next) traverseGroup(next);
-              });
-              allBlocks.forEach(x => {
-                if (x.linkedBlockIds?.includes(b.id)) traverseGroup(x);
-              });
-            }
-            traverseGroup(block);
-            if (visited.size > 0) {
-              groups.push(allBlocks.filter(b => visited.has(b.id)));
-              visited.forEach(id => visitedGlobal.add(id));
-            }
-          }
-          const currentGroup = groups.find(g => g.some(b => b.id === whatBlock.id)) || [];
-          const currentGroupIds = new Set(currentGroup.map(b => b.id));
-          const distractorPool = allBlocks.filter(b => b.type === 'what' && !(b as any).truthState && !currentGroupIds.has(b.id));
-          const correctContent = whatBlock.content;
+          // Distractors: what blocks from other groups (not in this group), and without a truthState
+          const distractorPool = allBlocks.filter((b: Block) => b.type === 'what' && b.id !== singleHowBlock.id && !groupWhatIds.has(b.id) && b.content && !(b as any).truthState);
           const distractors = distractorPool
-            .filter(b => b.content !== correctContent)
-            .map(b => b.content)
-            .filter((c, i, arr) => arr.indexOf(c) === i)
+            .map((b: Block) => b.content)
+            .filter((c: string | undefined): c is string => Boolean(c))
+            .filter((c: string, i: number, arr: string[]) => arr.indexOf(c) === i)
             .slice(0, 3);
-          const options = [...distractors, correctContent].sort(() => Math.random() - 0.5);
+          // Options: correct answer + distractors, shuffled
+          const options = [...distractors, singleHowBlock.content].sort(() => Math.random() - 0.5);
           quizQuestions.push({
-            id: `${whoBlock.id}-${whatBlock.id}`,
+            id: `${whoBlock.id}-${singleHowBlock.id}-how-as-what`,
             type: 'multiple-choice',
-            question: whoBlock.content,
-            answer: whatBlock.content,
+            question: whoBlock.content || '',
+            answer: singleHowBlock.content || '',
             options,
             questionImage: whoBlock.image,
-            answerImage: whatBlock.image,
-            noteId,
-            noteTitle,
+            answerImage: singleHowBlock.image,
+            noteId: whoBlock.noteId || '',
+            noteTitle: whoBlock.noteTitle || '',
             math: whoBlock.math,
           });
         }
       }
     }
-  }
-  notes.forEach(note => addQuizQuestionsFromBlocks(note.blocks, note.id, note.title, note));
-  const seen = new Set();
-  const deduped = quizQuestions.filter(q => {
-    if (seen.has(q.id)) return false;
-    seen.add(q.id);
-    return true;
+    // For each direct link to a what block
+    (whoBlock.linkedBlockIds || []).forEach((linkedId: string) => {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId && b.type === 'what');
+      if (linkedBlock && linkedBlock.content) {
+        // True/False: if the what block has a truthState
+        if ((linkedBlock as any).truthState) {
+          quizQuestions.push({
+            id: `${whoBlock.id}-${linkedBlock.id}-tf`,
+            type: 'true-false',
+            question: whoBlock.content || '',
+            statement: linkedBlock.content || '',
+            answer: (linkedBlock as any).truthState === 'true' ? 'True' : 'False',
+            options: ['True', 'False'].sort(() => Math.random() - 0.5),
+            questionImage: whoBlock.image,
+            answerImage: linkedBlock.image,
+            noteId: whoBlock.noteId || '',
+            noteTitle: whoBlock.noteTitle || '',
+            math: whoBlock.math,
+          });
+        } else {
+          // Distractors: what blocks from other groups (not in this group), and without a truthState
+          const distractorPool = allBlocks.filter((b: Block) => b.type === 'what' && b.id !== linkedBlock.id && !groupWhatIds.has(b.id) && b.content && !(b as any).truthState);
+          const distractors = distractorPool
+            .map((b: Block) => b.content)
+            .filter((c: string | undefined): c is string => Boolean(c))
+            .filter((c: string, i: number, arr: string[]) => arr.indexOf(c) === i)
+            .slice(0, 3);
+          // Options: correct answer + distractors, shuffled
+          const options = [...distractors, linkedBlock.content].sort(() => Math.random() - 0.5);
+          quizQuestions.push({
+            id: `${whoBlock.id}-${linkedBlock.id}`,
+            type: 'multiple-choice',
+            question: whoBlock.content || '',
+            answer: linkedBlock.content || '',
+            options,
+            questionImage: whoBlock.image,
+            answerImage: linkedBlock.image,
+            noteId: whoBlock.noteId || '',
+            noteTitle: whoBlock.noteTitle || '',
+            math: whoBlock.math,
+          });
+        }
+      }
+    });
+    // Sequence: if 2 or more HOW blocks in the group (use robust traversal)
+    const howBlocks = getOrderedHowBlocksForWho(whoBlock, allBlocks);
+    if (howBlocks.length >= 2) {
+      const howContents = howBlocks.map((b: Block) => b.content).filter((c: string | undefined): c is string => Boolean(c));
+      if (howContents.length >= 2) {
+        quizQuestions.push({
+          id: whoBlock.id + '-sequence',
+          type: 'sequence',
+          question: whoBlock.content || '',
+          sequence: [...howContents],
+          options: [...howContents].sort(() => Math.random() - 0.5),
+          noteId: whoBlock.noteId || '',
+          noteTitle: whoBlock.noteTitle || '',
+        });
+      }
+    }
   });
-  return deduped.sort(() => Math.random() - 0.5);
+
+  return quizQuestions;
 } 

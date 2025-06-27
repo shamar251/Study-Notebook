@@ -21,8 +21,9 @@ export interface Note {
 export interface Block {
   id: string;
   folderId?: number;
-  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how";
-  content: string;
+  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how" | "where-ref";
+  content?: string;
+  whereBlockId?: string;
   data?: any;
   createdAt: Date;
   lastModified: Date;

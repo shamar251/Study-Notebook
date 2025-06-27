@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useMemo } from "react"
 import { Video } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { InlineMath } from "react-katex"
@@ -16,7 +16,7 @@ interface BlockPreviewProps {
   index: number
 }
 
-export function BlockPreview({ block, index }: BlockPreviewProps) {
+export const BlockPreview = React.memo(function BlockPreview({ block, index }: BlockPreviewProps) {
   const [isClient, setIsClient] = useState(false)
 
   useEffect(() => {
@@ -26,7 +26,7 @@ export function BlockPreview({ block, index }: BlockPreviewProps) {
   const Icon = BLOCK_TYPE_ICONS[block.type]
   const Label = BLOCK_TYPE_LABELS[block.type]
 
-  const renderContent = () => {
+  const renderContent = useMemo(() => {
     switch (block.type) {
       case "where":
         return (
@@ -43,12 +43,12 @@ export function BlockPreview({ block, index }: BlockPreviewProps) {
             <h3 className="font-bold text-orange-800 dark:text-orange-300 mb-1">
               {Label}
             </h3>
-            {block.content.includes("$") ? (
+            {(block.content || "").includes("$") ? (
               <InlineMath
-                math={block.content.replace(/^\$/, "").replace(/\$$/, "")}
+                math={(block.content || "").replace(/^\\$/, "").replace(/\\$$/, "")}
               />
             ) : (
-              <p>{block.content}</p>
+              <p>{block.content || ""}</p>
             )}
           </div>
         )
@@ -58,12 +58,12 @@ export function BlockPreview({ block, index }: BlockPreviewProps) {
             <h3 className="font-bold text-blue-800 dark:text-blue-300 mb-1">
               {Label}
             </h3>
-            {block.content.includes("$") ? (
+            {(block.content || "").includes("$") ? (
               <InlineMath
-                math={block.content.replace(/^\$/, "").replace(/\$$/, "")}
+                math={(block.content || "").replace(/^\\$/, "").replace(/\\$$/, "")}
               />
             ) : (
-              <p>{block.content}</p>
+              <p>{block.content || ""}</p>
             )}
           </div>
         )
@@ -73,12 +73,12 @@ export function BlockPreview({ block, index }: BlockPreviewProps) {
             <h3 className="font-bold text-green-800 dark:text-green-300 mb-1">
               {Label}
             </h3>
-            {block.content.includes("$") ? (
+            {(block.content || "").includes("$") ? (
               <InlineMath
-                math={block.content.replace(/^\$/, "").replace(/\$$/, "")}
+                math={(block.content || "").replace(/^\\$/, "").replace(/\\$$/, "")}
               />
             ) : (
-              <p>{block.content}</p>
+              <p>{block.content || ""}</p>
             )}
           </div>
         )
@@ -147,14 +147,14 @@ export function BlockPreview({ block, index }: BlockPreviewProps) {
       default:
         return null
     }
-  }
+  }, [block.type, block.content, block.data?.language, Label]);
 
   return (
     <div className="flex items-start gap-2">
       <div className="flex-none w-8 text-right text-xs text-gray-500 mt-1 font-mono">
         [{index + 1}]
       </div>
-      {renderContent()}
+      {renderContent}
     </div>
   )
-} 
+}); 

@@ -40,6 +40,34 @@ function renderMathOrText(text: string, math?: boolean) {
   return text;
 }
 
+// Helper to get ordered HOW blocks in the same group as a WHO block
+function getOrderedHowBlocksForWho(whoBlock: Block, allBlocks: Block[]): Block[] {
+  // Use the same robust group traversal as the editor
+  const visited = new Set<string>();
+  function traverse(b: Block) {
+    if (!b || visited.has(b.id)) return;
+    visited.add(b.id);
+    // Forward
+    (b.linkedBlockIds || []).forEach(id => {
+      const next = allBlocks.find(x => x.id === id);
+      if (next) traverse(next);
+    });
+    // Backward
+    allBlocks.forEach(x => {
+      if (x.linkedBlockIds?.includes(b.id)) traverse(x);
+    });
+  }
+  traverse(whoBlock);
+
+  // Get all blocks in the group
+  const groupBlocks = allBlocks.filter(b => visited.has(b.id));
+
+  // Filter HOW blocks and sort by their order in allBlocks (UI order)
+  return groupBlocks
+    .filter(b => b.type === "how")
+    .sort((a, b) => allBlocks.indexOf(a) - allBlocks.indexOf(b));
+}
+
 export default function FlashcardView({ note, notes, folderName, onComplete }: FlashcardViewProps) {
   const [flashcards, setFlashcards] = useState<Flashcard[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -59,6 +87,26 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
     function addFlashcardsFromBlocks(blocks: Block[], noteId: string, noteTitle: string) {
       blocks.forEach((block) => {
         if (block.type === "who") {
+          // Get HOW blocks for this WHO block
+          const howBlocks = getOrderedHowBlocksForWho(block, blocks);
+
+          // Handle single HOW block as WHAT block for flashcards
+          if (howBlocks.length === 1) {
+            const singleHowBlock = howBlocks[0];
+            if (singleHowBlock.content && block.content) {
+              cards.push({
+                front: block.content,
+                back: singleHowBlock.content,
+                frontImage: block.image,
+                backImage: singleHowBlock.image,
+                noteId,
+                noteTitle,
+                math: block.math === true,
+                whatMath: singleHowBlock.math
+              });
+            }
+          }
+
           // Prefer explicit links if present
           const linkedWhatBlocks = Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length > 0
             ? block.linkedBlockIds
@@ -67,32 +115,36 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
             : [];
           if (linkedWhatBlocks.length > 0) {
             linkedWhatBlocks.forEach((whatBlock) => {
-              cards.push({
-                front: block.content,
-                back: whatBlock.content,
-                frontImage: block.image,
-                backImage: whatBlock.image,
-                noteId,
-                noteTitle,
-                math: block.math === true,
-                whatMath: whatBlock.math
-              })
+              if (block.content && whatBlock.content) {
+                cards.push({
+                  front: block.content,
+                  back: whatBlock.content,
+                  frontImage: block.image,
+                  backImage: whatBlock.image,
+                  noteId,
+                  noteTitle,
+                  math: block.math === true,
+                  whatMath: whatBlock.math
+                })
+              }
             })
           } else {
             // Fallback: group-based logic
             const groupBlocks = getConnectedGroup(block, blocks)
             const whatBlocks = groupBlocks.filter(b => b.type === "what" && b.content && b.content.trim() !== "")
             whatBlocks.forEach((whatBlock) => {
-              cards.push({
-                front: block.content,
-                back: whatBlock.content,
-                frontImage: block.image,
-                backImage: whatBlock.image,
-                noteId,
-                noteTitle,
-                math: block.math === true,
-                whatMath: whatBlock.math
-              })
+              if (block.content && whatBlock.content) {
+                cards.push({
+                  front: block.content,
+                  back: whatBlock.content,
+                  frontImage: block.image,
+                  backImage: whatBlock.image,
+                  noteId,
+                  noteTitle,
+                  math: block.math === true,
+                  whatMath: whatBlock.math
+                })
+              }
             })
           }
         }

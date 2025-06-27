@@ -130,7 +130,7 @@ export default function NoteApp() {
     (searchQuery === "" ||
       note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       note.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      note.blocks.some((block) => block.content.toLowerCase().includes(searchQuery.toLowerCase())))
+      note.blocks.some((block) => block.content?.toLowerCase().includes(searchQuery.toLowerCase())))
   );
 
   const createNewNote = async () => {

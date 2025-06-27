@@ -140,6 +140,45 @@ function generateTestQuestions(notes: Note[]): any[] {
       // Get all WHAT blocks in the group (including those with truthState)
       const groupWhatBlocks = groupBlocks.filter(b => b.type === "what");
       const groupWhatContents = groupWhatBlocks.map(b => b.content);
+
+      // Get HOW blocks for this WHO block
+      const howBlocks = getOrderedHowBlocksForWho(whoBlock, blocks);
+
+      // Handle single HOW block as WHAT block for test questions
+      if (howBlocks.length === 1) {
+        const singleHowBlock = howBlocks[0];
+        // Find all WHAT and HOW blocks from groups other than the current group for distractors
+        const currentGroup = findGroupForBlock(singleHowBlock.id) || [];
+        const currentGroupIds = new Set(currentGroup.map(b => b.id));
+        const distractorPool = allBlocks.filter(b =>
+          (b.type === 'what' || b.type === 'how') &&
+          !(b as any).truthState &&
+          !currentGroupIds.has(b.id)
+        );
+
+        const correctContent = singleHowBlock.content || '';
+        const distractors = distractorPool
+          .filter(b => b.content !== correctContent)
+          .map(b => b.content)
+          .filter((c): c is string => Boolean(c))
+          .filter((c, i, arr) => arr.indexOf(c) === i) // unique by content
+          .slice(0, 3);
+        const options = [...distractors, correctContent].sort(() => Math.random() - 0.5);
+
+        quizQuestions.push({
+          id: `${whoBlock.id}-${singleHowBlock.id}-how`,
+          type: "multiple-choice",
+          question: whoBlock.content || '',
+          answer: singleHowBlock.content || '',
+          options,
+          questionImage: whoBlock.image,
+          answerImage: singleHowBlock.image,
+          noteId,
+          noteTitle,
+          math: whoBlock.math,
+        });
+      }
+
       // For each WHAT block in the group, create a question
       for (const whatBlock of groupWhatBlocks) {
         if ((whatBlock as any).truthState) {
@@ -147,8 +186,8 @@ function generateTestQuestions(notes: Note[]): any[] {
           quizQuestions.push({
             id: `${whoBlock.id}-${whatBlock.id}-tf`,
             type: "true/false",
-            question: whoBlock.content,
-            statement: whatBlock.content,
+            question: whoBlock.content || '',
+            statement: whatBlock.content || '',
             answer: (whatBlock as any).truthState === "true" ? "True" : "False",
             options: ["True", "False"].sort(() => Math.random() - 0.5),
             questionImage: whoBlock.image,
@@ -170,18 +209,19 @@ function generateTestQuestions(notes: Note[]): any[] {
           console.log('Current group block IDs:', Array.from(currentGroupIds));
           console.log('Distractor pool:', distractorPool.map(b => ({ id: b.id, content: b.content })));
           // Pick up to 3 distractors, but never include WHATs from the same group or with the same content as the correct answer
-          const correctContent = whatBlock.content;
+          const correctContent = whatBlock.content || '';
           const distractors = distractorPool
             .filter(b => b.content !== correctContent)
             .map(b => b.content)
+            .filter((c): c is string => Boolean(c))
             .filter((c, i, arr) => arr.indexOf(c) === i) // unique by content
             .slice(0, 3);
           const options = [...distractors, correctContent].sort(() => Math.random() - 0.5);
           quizQuestions.push({
             id: `${whoBlock.id}-${whatBlock.id}`,
             type: "multiple-choice",
-            question: whoBlock.content,
-            answer: whatBlock.content,
+            question: whoBlock.content || '',
+            answer: whatBlock.content || '',
             options,
             questionImage: whoBlock.image,
             answerImage: whatBlock.image,

@@ -25,6 +25,7 @@ const NODE_COLORS: Record<Block['type'], string> = {
   code: '#6b7280',
   where: '#14b8a6',
   how: '#f97316',
+  'where-ref': '#14b8a6',
 };
 
 interface ReactFlowTreeVisualizerProps {
@@ -36,11 +37,22 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
   const blockMap = new Map(blocks.map(b => [b.id, b]));
   const linked = new Set<string>();
   blocks.forEach(b => b.linkedBlockIds?.forEach(id => linked.add(id)));
-  const roots = blocks.filter(b => !linked.has(b.id));
+  // Only use non-'where-ref' blocks as roots
+  const roots = blocks.filter(b => !linked.has(b.id) && b.type !== 'where-ref');
   const nodes: Node[] = [];
   const edges: Edge[] = [];
   let y = 0;
-  function addNode(block: Block, parentId?: string, depth = 0, siblingIdx = 0) {
+  function addNode(block: Block, parentId?: string, depth = 0, siblingIdx = 0, visited = new Set<string>()) {
+    if (visited.has(block.id)) return; // Prevent infinite recursion
+    visited.add(block.id);
+    if (block.type === 'where-ref' && block.whereBlockId) {
+      // Do not create a node for where-ref, just use the referenced where block
+      const referenced = blockMap.get(block.whereBlockId);
+      if (referenced) {
+        addNode(referenced, parentId, depth, siblingIdx, new Set(visited));
+      }
+      return;
+    }
     const nodeId = block.id;
     nodes.push({
       id: nodeId,
@@ -70,8 +82,13 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
     let childIdx = 0;
     (block.linkedBlockIds || []).forEach(childId => {
       const child = blockMap.get(childId);
-      if (child) {
-        addNode(child, nodeId, depth + 1, childIdx++);
+      if (child?.type === 'where-ref' && child.whereBlockId) {
+        const referenced = blockMap.get(child.whereBlockId);
+        if (referenced) {
+          addNode(referenced, nodeId, depth + 1, childIdx++, new Set(visited));
+        }
+      } else if (child) {
+        addNode(child, nodeId, depth + 1, childIdx++, new Set(visited));
       }
     });
     y++;
@@ -97,12 +114,16 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
       draggable: false,
     });
     roots.forEach((root, idx) => {
-      addNode(root, rootId, 1, idx);
+      addNode(root, rootId, 1, idx, new Set());
     });
   } else if (roots.length === 1) {
-    addNode(roots[0]);
+    addNode(roots[0], undefined, 0, 0, new Set());
   }
-  return { nodes, edges };
+  // Deduplicate edges by id
+  const uniqueEdges = Array.from(
+    new Map(edges.map(e => [e.id, e])).values()
+  );
+  return { nodes, edges: uniqueEdges };
 }
 
 export const ReactFlowTreeVisualizer: React.FC<ReactFlowTreeVisualizerProps> = ({ blocks }) => {

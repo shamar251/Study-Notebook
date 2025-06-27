@@ -1,8 +1,8 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 
-import { useState, useRef, useEffect, useCallback } from "react"
+import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus, Link as LinkIcon, MapPin, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,11 +21,17 @@ import { useWhereBlock } from "@/hooks/use-where-block"
 import { BLOCK_TYPE_ICONS, BLOCK_TYPE_LABELS } from "@/lib/block-types"
 import { BlockConnectionManager } from "@/lib/block-connections"
 import { getConnectedGroup } from "@/hooks/use-block-connections"
+import { GroupDetailModal } from "@/components/block-visualizer/GroupDetailModal"
+import { BlockDetailCard } from "@/components/block-visualizer/BlockDetailCard"
 
 interface EditorProps {
   note: Note
   updateNote: (note: Note) => void
 }
+
+// Memoized BlockEditor component to prevent unnecessary re-renders
+const MemoizedBlockEditor = React.memo(BlockEditor)
+const MemoizedBlockPreview = React.memo(BlockPreview)
 
 export default function Editor({ note, updateNote }: EditorProps) {
   const [editingTitle, setEditingTitle] = useState(false)
@@ -37,6 +43,8 @@ export default function Editor({ note, updateNote }: EditorProps) {
   const [showWhatPrompt, setShowWhatPrompt] = useState<string | null>(null)
   const titleInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const [groupModal, setGroupModal] = useState<{ groupBlocks: Block[], selectedBlock: Block } | null>(null);
+  const [blockDetailCardBlock, setBlockDetailCardBlock] = useState<Block | null>(null);
 
   // Use the block manager hook
   const blockManager = useBlockManager({
@@ -158,21 +166,21 @@ export default function Editor({ note, updateNote }: EditorProps) {
     return () => editor.removeEventListener('paste', handleNativePaste)
   }, [handlePaste])
 
-  const addTag = () => {
+  const addTag = useCallback(() => {
     if (newTag.trim() && !tags.includes(newTag.trim())) {
       setTags([...tags, newTag.trim()])
       setNewTag("")
     }
-  }
+  }, [newTag, tags])
 
-  const removeTag = (tag: string) => {
+  const removeTag = useCallback((tag: string) => {
     setTags(tags.filter((t) => t !== tag))
-  }
+  }, [tags])
 
-  const handleTitleSubmit = () => {
+  const handleTitleSubmit = useCallback(() => {
     setEditingTitle(false)
     // No need to explicitly call saveChanges as it will be triggered by the useEffect
-  }
+  }, [])
 
   // Helper to get all connected blocks in a sequence group (forward and backward)
   function getSequenceGroupBlocks(startBlock: Block, allBlocks: Block[]): Block[] {
@@ -195,10 +203,10 @@ export default function Editor({ note, updateNote }: EditorProps) {
   }
 
   // Toggle sequence mode for a block and all connected sequence blocks
-  const handleToggleSequenceMode = (blockId: string) => {
+  const handleToggleSequenceMode = useCallback((blockId: string) => {
     // This function is no longer needed as sequence mode is replaced by how blocks
     // Keeping for backward compatibility but it does nothing
-  }
+  }, [])
 
   // On initial load, migrate what blocks with sequence mode to how blocks
   useEffect(() => {
@@ -281,9 +289,8 @@ export default function Editor({ note, updateNote }: EditorProps) {
     });
   }, [note.id, note.migratedToHow, updateNote, note, title, tags]);
 
-  // Remove computeBlockEntities and entityMap
-  // Add groupMap: blockId -> groupId (lowest id in group)
-  function computeGroupMap(blocks: Block[]): Record<string, string> {
+  // Memoized group map computation - only recalculate when blocks change
+  const groupMap = useMemo(() => {
     const groupMap: Record<string, string> = {};
     const visited = new Set<string>();
     for (const block of blocks) {
@@ -301,9 +308,57 @@ export default function Editor({ note, updateNote }: EditorProps) {
       }
     }
     return groupMap;
-  }
+  }, [blocks]);
 
-  const groupMap = computeGroupMap(blocks);
+  // Memoized grouped blocks - only recalculate when blocks or groupMap change
+  const groupedBlocks = useMemo(() => {
+    return Object.entries(
+      blocks.reduce((acc, block) => {
+        const groupId = groupMap[block.id];
+        if (!acc[groupId]) acc[groupId] = [];
+        acc[groupId].push(block);
+        return acc;
+      }, {} as Record<string, Block[]>)
+    );
+  }, [blocks, groupMap]);
+
+  // Memoized unlinked who blocks count - only recalculate when blocks change
+  const unlinkedWhoBlocksCount = useMemo(() => {
+    return BlockConnectionManager.getUnlinkedWhoBlocks(blocks).length;
+  }, [blocks]);
+
+  // Handler for double-clicking a block
+  const handleBlockDoubleClick = useCallback((block: Block) => {
+    const groupBlocks = getConnectedGroup(block, blocks);
+    setGroupModal({ groupBlocks, selectedBlock: block });
+  }, [blocks]);
+
+  // Handler for selecting a block in the modal (open BlockDetailCard)
+  const handleSelectBlockInModal = useCallback((block: Block) => {
+    setGroupModal(null);
+    setBlockDetailCardBlock(block);
+  }, []);
+
+  // Handler for closing BlockDetailCard
+  const handleCloseBlockDetailCard = useCallback(() => {
+    setBlockDetailCardBlock(null);
+  }, []);
+
+  // Handler to replace a where block with a reference to an existing where block
+  const handleSelectExistingWhereBlock = useCallback((targetBlockId: string, referenceBlock: Block) => {
+    setBlocks(blocks => blocks.map(b =>
+      b.id === targetBlockId
+        ? {
+          id: b.id,
+          type: 'where-ref',
+          whereBlockId: referenceBlock.id,
+          createdAt: b.createdAt,
+          lastModified: new Date(),
+          sortOrder: b.sortOrder,
+        }
+        : b
+    ));
+  }, []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -378,29 +433,20 @@ export default function Editor({ note, updateNote }: EditorProps) {
       <div className="flex-1 overflow-y-auto" ref={editorRef}>
         <div className="w-full px-4">
           <div>
-            {Object.entries(
-              blocks.reduce((acc, block) => {
-                const groupId = groupMap[block.id];
-                if (!acc[groupId]) acc[groupId] = [];
-                acc[groupId].push(block);
-                return acc;
-              }, {} as Record<string, Block[]>)
-            ).map(([groupId, groupBlocks]) => {
+            {groupedBlocks.map(([groupId, groupBlocks]) => {
               // Remove background and border from group container, keep only spacing
               const groupContainerClass = "mb-4";
               return (
                 <div key={groupId} className={groupContainerClass}>
                   {groupBlocks.map((block, index) => {
-                    const connectionState = BlockConnectionManager.getConnectionState(block, blocks.indexOf(block), blocks);
                     const shouldStick = groupBlocks.length > 1;
                     const isFirstWhoInGroup = block.type === "who" && block.id === groupId;
-                    const blockClass = BlockConnectionManager.getBlockClasses(block, connectionState, shouldStick);
                     const extraClass = isFirstWhoInGroup ? "mt-8" : "";
                     // Remove border radius from block
                     return (
-                      <div key={block.id} className={`${blockClass} ${shouldStick ? "mb-0" : "mb-2"} ${extraClass}`}>
+                      <div key={`${block.id}-${block.type}-${index}`} className={`${shouldStick ? "mb-0" : "mb-2"} ${extraClass}`}>
                         {previewMode === "edit" ? (
-                          <BlockEditor
+                          <MemoizedBlockEditor
                             block={block}
                             index={blocks.indexOf(block)}
                             blocks={blocks}
@@ -423,9 +469,11 @@ export default function Editor({ note, updateNote }: EditorProps) {
                             onDisconnectBlocks={blockManager.disconnectBlocks}
                             entityId={groupId}
                             groupId={groupId}
+                            onDoubleClick={handleBlockDoubleClick}
+                            onSelectExistingWhereBlock={handleSelectExistingWhereBlock}
                           />
                         ) : (
-                          <BlockPreview
+                          <MemoizedBlockPreview
                             block={block}
                             index={blocks.indexOf(block)}
                           />
@@ -439,11 +487,11 @@ export default function Editor({ note, updateNote }: EditorProps) {
           </div>
 
           {/* Use centralized logic for unlinked WHO blocks */}
-          {BlockConnectionManager.getUnlinkedWhoBlocks(blocks).length > 0 && previewMode === "edit" && (
+          {unlinkedWhoBlocksCount > 0 && previewMode === "edit" && (
             <Alert className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 mt-6">
               <AlertCircle className="h-4 w-4 text-amber-600" />
               <AlertDescription>
-                You have {BlockConnectionManager.getUnlinkedWhoBlocks(blocks).length} WHO {BlockConnectionManager.getUnlinkedWhoBlocks(blocks).length === 1 ? "block" : "blocks"} without
+                You have {unlinkedWhoBlocksCount} WHO {unlinkedWhoBlocksCount === 1 ? "block" : "blocks"} without
                 linked WHAT blocks. Add WHAT blocks to use them in study modes.
               </AlertDescription>
             </Alert>
@@ -491,6 +539,28 @@ export default function Editor({ note, updateNote }: EditorProps) {
             </div>
           )}
         </div>
+        {/* Render GroupDetailModal if open */}
+        {groupModal && (
+          <GroupDetailModal
+            groupBlocks={groupModal.groupBlocks}
+            onClose={() => setGroupModal(null)}
+            onSelectBlock={handleSelectBlockInModal}
+          />
+        )}
+        {/* Render BlockDetailCard if open */}
+        {blockDetailCardBlock && (
+          <BlockDetailCard
+            block={blockDetailCardBlock}
+            onClose={handleCloseBlockDetailCard}
+            blocks={blocks}
+            onViewGroup={groupBlocks => {
+              setBlockDetailCardBlock(null);
+              setTimeout(() => {
+                setGroupModal({ groupBlocks, selectedBlock: groupBlocks[0] });
+              }, 0);
+            }}
+          />
+        )}
       </div>
     </div>
   )

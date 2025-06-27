@@ -32,6 +32,7 @@ const NODE_COLORS: Record<Block['type'], string> = {
   code: '#6b7280',
   where: '#14b8a6',
   how: '#f97316',
+  'where-ref': '#14b8a6',
 };
 
 function previewText(content: string) {
@@ -55,8 +56,10 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
     const links: GraphLink[] = [];
     const nodeMap = new Map<string, GraphNode>();
 
+    // Only create nodes for non-'where-ref' blocks
     groups.forEach((group, groupIndex) => {
       group.forEach(block => {
+        if (block.type === 'where-ref') return; // skip where-ref nodes
         const node: GraphNode = {
           id: block.id,
           type: block.type,
@@ -69,10 +72,20 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
     });
     nodesRef.current = nodes;
 
+    // Create links
     blocks.forEach(block => {
       if (block.linkedBlockIds) {
         block.linkedBlockIds.forEach(targetId => {
-          if (nodeMap.has(targetId)) {
+          const targetBlock = blocks.find(b => b.id === targetId);
+          if (targetBlock?.type === 'where-ref' && targetBlock.whereBlockId) {
+            // Link to the referenced 'where' block instead
+            if (nodeMap.has(targetBlock.whereBlockId)) {
+              links.push({
+                source: block.id,
+                target: targetBlock.whereBlockId
+              });
+            }
+          } else if (targetBlock && nodeMap.has(targetId)) {
             links.push({
               source: block.id,
               target: targetId
@@ -113,9 +126,15 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
       });
     }
 
+    // After nodes and links are created
+    const validNodeIds = new Set(nodes.map(n => n.id));
+    const filteredLinks = links.filter(
+      link => validNodeIds.has(link.source as string) && validNodeIds.has(link.target as string)
+    );
+
     // D3 force simulation
     const simulation = d3.forceSimulation<GraphNode>(nodes)
-      .force('link', d3.forceLink<GraphNode, GraphLink>(links).id((d) => d.id).distance(100))
+      .force('link', d3.forceLink<GraphNode, GraphLink>(filteredLinks).id((d) => d.id).distance(100))
       .force('charge', d3.forceManyBody().strength(-300))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collision', d3.forceCollide().radius(36));
@@ -123,7 +142,7 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
     // Draw links
     const link = container.append('g')
       .selectAll('line')
-      .data(links)
+      .data(filteredLinks)
       .join('line')
       .attr('stroke', '#999')
       .attr('stroke-opacity', 0.6)

@@ -8,13 +8,27 @@ interface WhereBlockEditorProps {
   block: Block
   onUpdateBlock: (id: string, content: string, data?: any) => void
   getExistingWhereBlocks: () => Block[]
+  onSelectExistingWhereBlock: (targetBlockId: string, referenceBlock: Block) => void
+  referencedWhereBlock?: Block
 }
 
-export function WhereBlockEditor({ block, onUpdateBlock, getExistingWhereBlocks }: WhereBlockEditorProps) {
-  const existingWhereBlocks = getExistingWhereBlocks()
+export function WhereBlockEditor({ block, onUpdateBlock, getExistingWhereBlocks, onSelectExistingWhereBlock, referencedWhereBlock }: WhereBlockEditorProps) {
+  const existingWhereBlocks = getExistingWhereBlocks().filter(b => b.id !== block.id)
 
-  const handleExistingLocationSelect = (selectedBlock: Block) => {
-    onUpdateBlock(block.id, selectedBlock.content, selectedBlock.data)
+  if (block.type === 'where-ref' && referencedWhereBlock) {
+    return (
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Input
+            type="text"
+            value={referencedWhereBlock.content}
+            readOnly
+            placeholder="Referenced location..."
+          />
+        </div>
+        <div className="text-xs text-gray-500">This is a reference to another location block.</div>
+      </div>
+    )
   }
 
   return (
@@ -32,12 +46,12 @@ export function WhereBlockEditor({ block, onUpdateBlock, getExistingWhereBlocks 
         <div className="space-y-2">
           <h4 className="text-sm font-medium">Or select existing location:</h4>
           <div className="flex flex-wrap gap-2">
-            {existingWhereBlocks.map((b) => (
+            {existingWhereBlocks.map((b, idx) => (
               <Button
-                key={b.id}
+                key={`${b.id}-${idx}`}
                 variant="outline"
                 size="sm"
-                onClick={() => handleExistingLocationSelect(b)}
+                onClick={() => onSelectExistingWhereBlock(block.id, b)}
               >
                 <MapIcon className="mr-2 h-4 w-4" />
                 {b.content}
