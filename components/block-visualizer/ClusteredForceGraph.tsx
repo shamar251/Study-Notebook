@@ -4,6 +4,7 @@ import type { Block } from '@/lib/db';
 import { getConnectedGroup } from '@/hooks/use-block-connections';
 import { BlockDetailCard } from './BlockDetailCard';
 import { GroupDetailModal } from './GroupDetailModal';
+import { BlockNavigationCard } from './BlockNavigationCard';
 
 interface ClusteredForceGraphProps {
   blocks: Block[];
@@ -45,6 +46,7 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [groupModal, setGroupModal] = useState<{ groupBlocks: Block[] } | null>(null);
   const nodesRef = useRef<GraphNode[]>([]);
+  const zoomRef = useRef<any>(null);
 
   useEffect(() => {
     if (!blocks.length || !svgRef.current) return;
@@ -104,6 +106,7 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
       .on('zoom', (event) => {
         container.attr('transform', event.transform);
       });
+    zoomRef.current = zoom;
     svg.call(zoom);
 
     // Draw convex hulls for each group
@@ -265,18 +268,18 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
       );
     }
     const block = selectedNode ? getBlockById(selectedNode.id) || null : null;
-    return <BlockDetailCard block={block} onClose={() => setSelectedNode(null)} blocks={blocks} onViewGroup={groupBlocks => setGroupModal({ groupBlocks })} />;
+    return <BlockDetailCard block={block} onClose={() => setSelectedNode(null)} blocks={blocks} onViewGroup={groupBlocks => setGroupModal({ groupBlocks })} defaultMinimized={false} />;
   };
 
   return (
-    <div className="w-full" style={{ position: 'relative' }}>
-      <div className="mb-4 ml-4">
+    <div className="w-full" style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '98%' }}>
+      <div className="mb-4 ml-4" style={{ flex: '0 0 auto' }}>
         <h3 className="text-lg font-semibold mb-2 ">Clustered Force-Directed Graph</h3>
         <p className="text-sm text-gray-600 mb-4">
           Nodes are grouped by connected clusters. Drag nodes to rearrange, scroll to zoom, and click a node for details.
         </p>
       </div>
-      <div className="h-full overflow-hidden bg-white" style={{ position: 'relative' }}>
+      <div className="h-full overflow-hidden bg-white" style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         <svg
           ref={svgRef}
           width={width}
@@ -285,6 +288,25 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
         />
         {renderCard()}
       </div>
+      <BlockNavigationCard
+        blocks={blocks}
+        onNavigateToBlock={block => {
+          const node = nodesRef.current.find(n => n.id === block.id);
+          if (node) {
+            setSelectedNode(node);
+            // Center the SVG view on the node
+            if (svgRef.current && node.x !== undefined && node.y !== undefined && zoomRef.current) {
+              const svg = d3.select(svgRef.current);
+              const svgWidth = svgRef.current.clientWidth;
+              const svgHeight = svgRef.current.clientHeight;
+              const scale = 1.2;
+              const tx = svgWidth / 2 - node.x * scale;
+              const ty = svgHeight / 2 - node.y * scale;
+              svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+            }
+          }
+        }}
+      />
     </div>
   );
 }; 

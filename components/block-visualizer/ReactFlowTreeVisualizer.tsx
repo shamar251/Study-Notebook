@@ -9,12 +9,15 @@ import ReactFlow, {
   Node,
   Edge,
   Position,
+  useReactFlow,
+  ReactFlowProvider,
 } from 'react-flow-renderer';
 import type { Block } from '@/lib/db';
 import { BLOCK_TYPE_LABELS } from '@/lib/block-types';
 import { BlockDetailCard } from './BlockDetailCard';
 import { GroupDetailModal } from './GroupDetailModal';
 import { getConnectedGroup } from '@/hooks/use-block-connections';
+import { BlockNavigationCard } from './BlockNavigationCard';
 
 const NODE_COLORS: Record<Block['type'], string> = {
   who: '#3b82f6',
@@ -126,12 +129,14 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
   return { nodes, edges: uniqueEdges };
 }
 
-export const ReactFlowTreeVisualizer: React.FC<ReactFlowTreeVisualizerProps> = ({ blocks }) => {
+// Inner component that uses useReactFlow
+const ReactFlowTreeVisualizerInner: React.FC<ReactFlowTreeVisualizerProps> = ({ blocks }) => {
   const { nodes: initialNodes, edges: initialEdges } = useMemo(() => blocksToFlow(blocks), [blocks]);
   const [nodes, , onNodesChange] = useNodesState(initialNodes);
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [groupModal, setGroupModal] = useState<Block[] | null>(null);
+  const reactFlowInstance = useReactFlow();
 
   const onConnect = useCallback((params: any) => addEdge(params, edges), [edges]);
 
@@ -165,29 +170,51 @@ export const ReactFlowTreeVisualizer: React.FC<ReactFlowTreeVisualizerProps> = (
         onClose={() => setSelectedBlockId(null)}
         blocks={blocks}
         onViewGroup={groupBlocks => setGroupModal(groupBlocks)}
+        defaultMinimized={false}
       />
     );
   };
 
   return (
-    <div style={{ width: '100%', height: 600, background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px #0001', position: 'relative' }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        fitView
-        panOnDrag
-        zoomOnScroll
-        attributionPosition="bottom-right"
-        onNodeClick={onNodeClick}
-      >
-        <MiniMap nodeColor={n => n.style?.background as string || '#888'} />
-        <Controls />
-        <Background gap={16} color="#eee" />
-      </ReactFlow>
-      {(selectedBlock || groupModal) && renderOverlays()}
+    <div style={{ width: '100%', height: '98%', background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px #0001', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          fitView
+          panOnDrag
+          zoomOnScroll
+          attributionPosition="bottom-right"
+          onNodeClick={onNodeClick}
+        >
+          <MiniMap nodeColor={n => n.style?.background as string || '#888'} />
+          <Controls />
+          <Background gap={16} color="#eee" />
+        </ReactFlow>
+        {(selectedBlock || groupModal) && renderOverlays()}
+      </div>
+      <BlockNavigationCard
+        blocks={blocks}
+        onNavigateToBlock={block => {
+          setSelectedBlockId(block.id);
+          // Center the view on the node
+          const node = reactFlowInstance.getNode(block.id);
+          if (node && node.position) {
+            reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 500 });
+          }
+        }}
+      />
     </div>
+  );
+};
+
+export const ReactFlowTreeVisualizer: React.FC<ReactFlowTreeVisualizerProps> = ({ blocks }) => {
+  return (
+    <ReactFlowProvider>
+      <ReactFlowTreeVisualizerInner blocks={blocks} />
+    </ReactFlowProvider>
   );
 }; 

@@ -29,6 +29,7 @@ interface Flashcard {
   noteTitle: string
   math: boolean
   whatMath?: boolean
+  hint?: string
 }
 
 // Helper to render text or math
@@ -102,9 +103,27 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
                 noteId,
                 noteTitle,
                 math: block.math === true,
-                whatMath: singleHowBlock.math
+                whatMath: singleHowBlock.math,
+                hint: "how #1"
               });
             }
+          } else if (howBlocks.length > 1) {
+            // Multiple HOW blocks - create a card for each
+            howBlocks.forEach((howBlock, index) => {
+              if (howBlock.content && block.content) {
+                cards.push({
+                  front: block.content,
+                  back: howBlock.content,
+                  frontImage: block.image,
+                  backImage: howBlock.image,
+                  noteId,
+                  noteTitle,
+                  math: block.math === true,
+                  whatMath: howBlock.math,
+                  hint: `how #${index + 1}`
+                });
+              }
+            });
           }
 
           // Prefer explicit links if present
@@ -114,7 +133,7 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
               .filter(Boolean) as Block[]
             : [];
           if (linkedWhatBlocks.length > 0) {
-            linkedWhatBlocks.forEach((whatBlock) => {
+            linkedWhatBlocks.forEach((whatBlock, index) => {
               if (block.content && whatBlock.content) {
                 cards.push({
                   front: block.content,
@@ -124,7 +143,8 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
                   noteId,
                   noteTitle,
                   math: block.math === true,
-                  whatMath: whatBlock.math
+                  whatMath: whatBlock.math,
+                  hint: linkedWhatBlocks.length > 1 ? `what #${index + 1}` : undefined
                 })
               }
             })
@@ -132,7 +152,7 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
             // Fallback: group-based logic
             const groupBlocks = getConnectedGroup(block, blocks)
             const whatBlocks = groupBlocks.filter(b => b.type === "what" && b.content && b.content.trim() !== "")
-            whatBlocks.forEach((whatBlock) => {
+            whatBlocks.forEach((whatBlock, index) => {
               if (block.content && whatBlock.content) {
                 cards.push({
                   front: block.content,
@@ -142,7 +162,8 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
                   noteId,
                   noteTitle,
                   math: block.math === true,
-                  whatMath: whatBlock.math
+                  whatMath: whatBlock.math,
+                  hint: whatBlocks.length > 1 ? `what #${index + 1}` : undefined
                 })
               }
             })
@@ -297,6 +318,15 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
           onClick={toggleFlip}
         >
           <div className="relative w-full h-full">
+            {/* Hint label - only show when there's a hint */}
+            {flashcards[currentIndex].hint && (
+              <div className="absolute bottom-4 right-4 z-10">
+                <span className="px-2 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full">
+                  {flashcards[currentIndex].hint}
+                </span>
+              </div>
+            )}
+
             <div
               className={`absolute inset-0 flex flex-col items-center justify-center p-8 transition-opacity duration-300 ${flipped ? "opacity-0" : "opacity-100"
                 }`}

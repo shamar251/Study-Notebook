@@ -11,6 +11,7 @@ export interface Note {
   order: number;
   deletedAt?: number;
   migratedToHow?: boolean;
+  autoFixedLegacyLinks?: boolean;
   studyStats?: {
     quizAttempts: number;
     quizCorrect: number;

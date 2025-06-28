@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Plus, Search, Settings, BookOpen, Brain, Save, FolderOpen, Trash2, MoreHorizontal } from "lucide-react"
+import { Plus, Search, Settings, BookOpen, Brain, Save, FolderOpen, Trash2, MoreHorizontal, ArrowLeft } from "lucide-react"
 import { useNotes, useFolders, addNote, updateNote, deleteNote, addFolder, updateFolder, deleteFolder, searchNotes, getAllChildFolderIds } from "@/hooks/use-db"
 import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, updateFolderPath, type Note as DBNote, type Folder as DBFolder, moveToTrash, restoreFromTrash, permanentDelete, type Block } from "@/lib/db"
 import Sidebar from "@/components/sidebar"
@@ -24,7 +24,7 @@ import {
   BLOCK_TYPE_LABELS
 } from "@/lib/block-types"
 import { type BlockType } from "@/lib/block-types"
-import { ClusteredForceGraph, D3BlockVisualizer, TreeVisualizer, ReactFlowTreeVisualizer } from "./block-visualizer"
+import { ClusteredForceGraph, D3BlockVisualizer, ReactFlowTreeVisualizer } from "./block-visualizer"
 import { Select } from "./ui/select"
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
@@ -48,6 +48,7 @@ export default function NoteApp() {
   const [folderNotes, setFolderNotes] = useState<Note[]>([]);
   const { theme, setTheme } = useTheme();
   const [visualizationMode, setVisualizationMode] = useState<'clustered' | 'classic' | 'tree' | 'reactflow'>('clustered');
+  const [testTarget, setTestTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
 
   useEffect(() => {
     // Initialize database with default data if empty
@@ -336,15 +337,35 @@ export default function NoteApp() {
     // This prevents the infinite update loop
   }
 
-  const selectStudyMode = (mode: "flashcards" | "quiz" | "test", note?: Note) => {
+  const selectStudyMode = (mode: "flashcards" | "quiz" | "test", note?: Note, subfolderId?: string) => {
     if (note) {
       setActiveNote(note);
       setView(mode);
       setShowStudyModeSelector(false);
+      if (mode === "test") {
+        setTestTarget({ type: 'note', note });
+      } else {
+        setTestTarget(null);
+      }
+    } else if (subfolderId) {
+      setActiveNote(null);
+      setView(mode);
+      setShowStudyModeSelector(false);
+      setActiveFolder(subfolderId);
+      if (mode === "test") {
+        setTestTarget({ type: 'folder', folderId: subfolderId });
+      } else {
+        setTestTarget(null);
+      }
     } else {
       setActiveNote(null);
       setView(mode);
       setShowStudyModeSelector(false);
+      if (mode === "test") {
+        setTestTarget({ type: 'folder', folderId: activeFolder || "" });
+      } else {
+        setTestTarget(null);
+      }
     }
   };
 
@@ -387,6 +408,10 @@ export default function NoteApp() {
     setView("editor")
     setShowStudyModeSelector(false)
     setShowDashboard(false)
+    // If currently in test view, update testTarget to the new note
+    if (view === "test") {
+      setTestTarget({ type: 'note', note });
+    }
   }
 
   const deselectNote = () => {
@@ -890,22 +915,43 @@ export default function NoteApp() {
                 </TabsContent>
 
                 <TabsContent value="test" className="flex-1 p-0 m-0 h-full overflow-hidden">
-                  <TestView
-                    availableFolders={folders.map((f) => ({
-                      id: f.id,
-                      name: f.name
-                    }))}
-                    availableNotes={notes.map((n) => ({
-                      id: n.id,
-                      title: n.title,
-                      folderId: n.folderId
-                    }))}
-                    defaultNoteId={activeNote.id}
-                    onTestComplete={async (session) => {
-                      await db.testSessions.add(session)
-                      console.log("Test session saved:", session)
-                    }}
-                  />
+                  {testTarget?.type === 'note' && (
+                    <TestView
+                      availableFolders={folders.map((f) => ({
+                        id: f.id,
+                        name: f.name
+                      }))}
+                      availableNotes={notes.map((n) => ({
+                        id: n.id,
+                        title: n.title,
+                        folderId: n.folderId
+                      }))}
+                      defaultNoteId={testTarget.note.id}
+                      onTestComplete={async (session) => {
+                        await db.testSessions.add(session)
+                        console.log("Test session saved:", session)
+                      }}
+                    />
+                  )}
+                  {testTarget?.type === 'folder' && (
+                    <TestView
+                      availableFolders={folders.map((f) => ({
+                        id: f.id,
+                        name: f.name
+                      }))}
+                      availableNotes={notes.map((n) => ({
+                        id: n.id,
+                        title: n.title,
+                        folderId: n.folderId
+                      }))}
+                      defaultFolderId={testTarget.folderId || undefined}
+                      autoStartIfDefault={true}
+                      onTestComplete={async (session) => {
+                        await db.testSessions.add(session)
+                        console.log("Test session saved:", session)
+                      }}
+                    />
+                  )}
                 </TabsContent>
 
                 <TabsContent value="view" className="flex-1 p-0 m-0 h-full overflow-hidden">
@@ -934,6 +980,76 @@ export default function NoteApp() {
                   )}
                 </TabsContent>
               </Tabs>
+            </div>
+          )}
+
+          {/* Folder-level study modes (when activeNote is null but view is set) */}
+          {!activeNote && !showStudyModeSelector && !showDashboard && view && ["flashcards", "quiz", "test"].includes(view) && (
+            <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-2 border-b">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setView(null);
+                      setShowStudyModeSelector(true);
+                      setTestTarget(null);
+                    }}
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to Folder
+                  </Button>
+                  {/* <span className="text-sm font-medium">
+                    {view === "flashcards" && "Flashcards"}
+                    {view === "quiz" && "Quiz"}
+                    {view === "test" && "Test"}
+                    {activeFolder && ` - ${folders.find(f => f.id === activeFolder)?.name}`}
+                  </span> */}
+                </div>
+              </div>
+
+              {view === "flashcards" && (
+                <FlashcardView
+                  notes={folderNotes}
+                  folderName={folders.find(f => f.id === activeFolder)?.name || "Study"}
+                  onComplete={() => {
+                    // Handle completion for folder-level flashcards
+                    console.log("Folder flashcards completed");
+                  }}
+                />
+              )}
+
+              {view === "quiz" && (
+                <QuizView
+                  notes={folderNotes}
+                  folderName={folders.find(f => f.id === activeFolder)?.name || "Study"}
+                  onComplete={(noteId, score, total) => {
+                    // Handle completion for folder-level quiz
+                    console.log("Folder quiz completed", { noteId, score, total });
+                  }}
+                />
+              )}
+
+              {view === "test" && (
+                <TestView
+                  availableFolders={folders.map((f) => ({
+                    id: f.id,
+                    name: f.name
+                  }))}
+                  availableNotes={notes.map((n) => ({
+                    id: n.id,
+                    title: n.title,
+                    folderId: n.folderId
+                  }))}
+                  defaultFolderId={activeFolder || undefined}
+                  autoStartIfDefault={true}
+                  onTestComplete={async (session) => {
+                    await db.testSessions.add(session)
+                    console.log("Test session saved:", session)
+                  }}
+                />
+              )}
             </div>
           )}
         </main>

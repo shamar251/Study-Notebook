@@ -126,10 +126,38 @@ export const BlockEditor = React.memo(function BlockEditor({
     [block, connectionState]
   );
 
-  // Memoize group calculations
+  // Optimized group calculations - avoid calling getConnectedGroup for every block
   const groupData = useMemo(() => {
-    const groupBlocks = getConnectedGroup(block, blocks).sort((a, b) => blocks.indexOf(a) - blocks.indexOf(b));
+    // Use a more efficient approach for group calculations
+    const visited = new Set<string>();
+    const groupBlocks: Block[] = [];
+
+    // Simple traversal without expensive getConnectedGroup call
+    const traverse = (currentBlock: Block) => {
+      if (visited.has(currentBlock.id)) return;
+      visited.add(currentBlock.id);
+      groupBlocks.push(currentBlock);
+
+      // Forward connections
+      (currentBlock.linkedBlockIds || []).forEach(id => {
+        const next = blocks.find(x => x.id === id);
+        if (next) traverse(next);
+      });
+
+      // Backward connections
+      blocks.forEach(x => {
+        if (x.linkedBlockIds?.includes(currentBlock.id) && !visited.has(x.id)) {
+          traverse(x);
+        }
+      });
+    };
+
+    traverse(block);
+
+    // Sort by original order
+    groupBlocks.sort((a, b) => blocks.indexOf(a) - blocks.indexOf(b));
     const groupIndex = groupBlocks.findIndex(b => b.id === block.id);
+
     let borderRadiusClass = "";
     if (groupBlocks.length === 1) {
       borderRadiusClass = "rounded-lg";
@@ -138,14 +166,46 @@ export const BlockEditor = React.memo(function BlockEditor({
     } else if (groupIndex === groupBlocks.length - 1) {
       borderRadiusClass = "rounded-b-lg";
     }
+
     return { groupBlocks, groupIndex, borderRadiusClass };
   }, [block, blocks]);
 
-  // Memoize linked group check
-  const inLinkedGroup = useMemo(() =>
-    isBlockInLinkedGroup(block, blocks),
-    [block, blocks]
-  );
+  // Optimized linked group check - avoid expensive traversal
+  const inLinkedGroup = useMemo(() => {
+    // Quick check first
+    const hasOutgoingConnections = block.linkedBlockIds && block.linkedBlockIds.length > 0;
+    const hasIncomingConnections = blocks.some(b => b.linkedBlockIds?.includes(block.id));
+
+    if (!hasOutgoingConnections && !hasIncomingConnections) return false;
+
+    // Only do full traversal if we have connections
+    const visited = new Set<string>();
+    const stack: Block[] = [block];
+
+    while (stack.length > 0) {
+      const currentBlock = stack.pop()!;
+      if (visited.has(currentBlock.id)) continue;
+
+      visited.add(currentBlock.id);
+
+      // Add forward connections
+      (currentBlock.linkedBlockIds || []).forEach(id => {
+        const next = blocks.find(x => x.id === id);
+        if (next && !visited.has(next.id)) {
+          stack.push(next);
+        }
+      });
+
+      // Add backward connections
+      blocks.forEach(x => {
+        if (x.linkedBlockIds?.includes(currentBlock.id) && !visited.has(x.id)) {
+          stack.push(x);
+        }
+      });
+    }
+
+    return visited.size > 1;
+  }, [block, blocks]);
 
   const shouldStick = inLinkedGroup;
 

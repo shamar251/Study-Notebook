@@ -5,6 +5,7 @@ import { getConnectedGroup } from '@/hooks/use-block-connections';
 import { BLOCK_TYPE_COLORS } from '@/lib/block-types';
 import { BlockDetailCard } from './BlockDetailCard';
 import { GroupDetailModal } from './GroupDetailModal';
+import { BlockNavigationCard } from './BlockNavigationCard';
 
 interface D3BlockVisualizerProps {
   blocks: Block[];
@@ -34,6 +35,7 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
   const [cardPos, setCardPos] = useState<{ x: number; y: number } | null>(null);
   const [groupModal, setGroupModal] = useState<{ groupBlocks: Block[] } | null>(null);
   const nodesRef = useRef<GraphNode[]>([]);
+  const zoomRef = useRef<any>(null);
 
   useEffect(() => {
     if (!blocks.length || !svgRef.current) return;
@@ -100,7 +102,7 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
       .on('zoom', (event) => {
         container.attr('transform', event.transform);
       });
-
+    zoomRef.current = zoom;
     svg.call(zoom);
 
     // Create container for the graph
@@ -279,29 +281,18 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
       );
     }
     const block = selectedNode ? getBlockById(selectedNode.id) || null : null;
-    return <BlockDetailCard block={block} onClose={() => { setSelectedNode(null); setCardPos(null); }} blocks={blocks} onViewGroup={groupBlocks => setGroupModal({ groupBlocks })} />;
+    return <BlockDetailCard block={block} onClose={() => { setSelectedNode(null); setCardPos(null); }} blocks={blocks} onViewGroup={groupBlocks => setGroupModal({ groupBlocks })} defaultMinimized={false} />;
   };
 
   return (
-    <div className="w-full" style={{ position: 'relative' }}>
-      <div className="mb-4 ml-4">
+    <div className="w-full" style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '98%' }}>
+      <div className="mb-4 ml-4" style={{ flex: '0 0 auto' }}>
         <h3 className="text-lg font-semibold mb-2 ">Block Connections Visualization</h3>
         <p className="text-sm text-gray-600 mb-4">
           Drag nodes to rearrange, scroll to zoom, and click a node for details
         </p>
-        <div className="flex flex-wrap gap-2 mb-4">
-          {(['who', 'what', 'note', 'image', 'video', 'code', 'where', 'how'] as const).map(type => (
-            <div key={type} className="flex items-center gap-1">
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: getNodeColor(type) }}
-              />
-              <span className="text-xs font-medium">{type.toUpperCase()}</span>
-            </div>
-          ))}
-        </div>
       </div>
-      <div className="h-full overflow-hidden bg-white" style={{ position: 'relative' }}>
+      <div className="h-full overflow-hidden bg-white" style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         <svg
           ref={svgRef}
           width={width}
@@ -310,6 +301,25 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
         />
         {renderCard()}
       </div>
+      <BlockNavigationCard
+        blocks={blocks}
+        onNavigateToBlock={block => {
+          const node = nodesRef.current.find(n => n.id === block.id);
+          if (node) {
+            setSelectedNode(node);
+            // Center the SVG view on the node
+            if (svgRef.current && node.x !== undefined && node.y !== undefined && zoomRef.current) {
+              const svg = d3.select(svgRef.current);
+              const svgWidth = svgRef.current.clientWidth;
+              const svgHeight = svgRef.current.clientHeight;
+              const scale = 1.2;
+              const tx = svgWidth / 2 - node.x * scale;
+              const ty = svgHeight / 2 - node.y * scale;
+              svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+            }
+          }
+        }}
+      />
     </div>
   );
 }; 

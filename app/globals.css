@@ -83,4 +83,40 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Performance optimizations for smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Optimize scrolling containers */
+  .overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+    /* Smooth scrolling on iOS */
+    scrollbar-width: thin;
+    /* Thin scrollbars on Firefox */
+  }
+
+  /* Optimize rendering for complex components */
+  .editor-container {
+    contain: layout style paint;
+    will-change: scroll-position;
+  }
+
+  /* Reduce repaints during scrolling */
+  .block-container {
+    contain: layout style;
+    transform: translateZ(0);
+    /* Force hardware acceleration */
+  }
+
+  /* Optimize animations */
+  .animate-spin {
+    will-change: transform;
+  }
+
+  /* Reduce layout thrashing */
+  .sidebar-container {
+    contain: layout style;
+  }
 }

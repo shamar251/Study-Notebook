@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { BookOpen, Brain, Clock, Edit, Plus, Calendar, Tag, GraduationCap, Folder as FolderIcon, FileText, HomeIcon, Flame } from "lucide-react"
+import { BookOpen, Brain, Clock, Edit, Plus, Calendar, Tag, GraduationCap, Folder as FolderIcon, FileText, HomeIcon, Flame, Layers, ListChecks } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -192,373 +192,122 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
 
         </div>
 
-        {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Study Folders</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {folders.length}
-              </div>
-              <p className="text-sm text-gray-500 mt-1"> Study folders you've created</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Study Items</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">
-                {notes.reduce((total, note) => total + countStudyPairs(note), 0)}
-              </div>
-              <p className="text-sm text-gray-500 mt-1">WHO/WHAT pairs for studying</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Study Progress</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2">
-                <div className="text-3xl font-bold">
-                  {(() => {
-                    const notesWithQuizzes = notes.filter((n) => n.studyStats && n.studyStats.quizAttempts && n.studyStats.quizAttempts > 0)
-                    if (notesWithQuizzes.length === 0) return "0%"
-
-                    const totalProgress = notesWithQuizzes.reduce((total, note) => total + getStudyProgress(note), 0)
-                    return `${Math.round(totalProgress / notesWithQuizzes.length)}%`
-                  })()}
-                </div>
-                <Progress
-                  value={(() => {
-                    const notesWithQuizzes = notes.filter((n) => n.studyStats && n.studyStats.quizAttempts && n.studyStats.quizAttempts > 0)
-                    if (notesWithQuizzes.length === 0) return 0
-
-                    const totalProgress = notesWithQuizzes.reduce((total, note) => total + getStudyProgress(note), 0)
-                    return Math.round(totalProgress / notesWithQuizzes.length)
-                  })()}
-                  className="h-2 flex-1"
-                />
-              </div>
-              <p className="text-sm text-gray-500 mt-1">Average quiz score</p>
-            </CardContent>
-          </Card>
-        </div> */}
-
-
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-6">
-            <TabsTrigger value="recent"><Clock className="w-4 h-4 mr-1" />Recent</TabsTrigger>
-            <TabsTrigger value="study"><GraduationCap className="w-4 h-4 mr-1" />Study History</TabsTrigger>
-            <TabsTrigger value="review"><Tag className="w-4 h-4 mr-1" />Needs Review</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="recent" className="mt-0">
-            <div className="mb-8">
-              <h2 className="text-xl font-bold mb-4"></h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {recentItems.map(({ type, item }) =>
-                  type === "note" ? (
-                    <Card key={item.id} className="overflow-hidden">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <CardTitle className="text-lg flex items-center gap-2">
-                              <FileText className="w-4 h-4 text-black" />
-                              {item.title}
-                            </CardTitle>
-                            <CardDescription>{getFolderName(item.folderId)}</CardDescription>
-                          </div>
-                          <Badge variant="outline" className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" /> <TimeSince timestamp={item.updatedAt} />
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pb-2">
-                        <div className="flex flex-wrap gap-1 mb-2">
-                          {item.tags && item.tags.length > 0 ? (
-                            item.tags.map((tag: any) => (
-                              <Badge key={tag} variant="secondary" className="text-xs">
-                                {tag}
-                              </Badge>
-                            ))
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">No tags</Badge>
-                          )}
-                        </div>
-                        <p className="text-sm text-gray-500 line-clamp-2">
-                          {item.blocks.find((b: any) => b.type === "note")?.content ||
-                            item.blocks.find((b: any) => b.type === "what")?.content ||
-                            "No content"}
-                        </p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center">
-                            <span className="font-medium mr-1">{countStudyPairs(item)}</span> study items
-                          </div>
-                          {item.studyStats?.quizAttempts ? (
-                            <div className="text-xs text-green-600 dark:text-green-400 flex items-center">
-                              <span className="font-medium mr-1">{getStudyProgress(item)}%</span> quiz score
-                            </div>
-                          ) : null}
-                        </div>
-                      </CardContent>
-                      <CardFooter className="pt-2 flex justify-between">
-                        <Button variant="outline" size="sm" onClick={() => onOpenNote(item)}>
-                          <Edit className="w-3 h-3 mr-1" /> Edit
-                        </Button>
-                        <div className="flex gap-2">
-                          <Button variant="ghost" size="sm" onClick={() => onStudyNote(item, "flashcards")}>
-                            <BookOpen className="w-3 h-3 mr-1" /> Cards
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => onStudyNote(item, "quiz")}>
-                            <Brain className="w-3 h-3 mr-1" /> Quiz
-                          </Button>
-                        </div>
-                      </CardFooter>
-                    </Card>
-                  ) : (
-                    <Card key={item.id} className="overflow-hidden">
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <CardTitle className="text-lg flex items-center gap-2">
-                              <FolderIcon className="w-4 h-4 text-black" />
-                              {item.name}
-                            </CardTitle>
-                            <CardDescription>
-                              {notes.filter((note: any) => note.folderId === item.id).length} notes
-                            </CardDescription>
-                            {item.description && (
-                              <div className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</div>
-                            )}
-                          </div>
-                          <Badge variant="outline" className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {typeof item.createdAt === 'number' && item.createdAt > 0 ? <TimeSince timestamp={item.createdAt} /> : <span>Unknown</span>}
-                          </Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="pb-2">
-                        <div className="flex items-center gap-2 mb-2">
-                          <a href="#" className="text-xs text-blue-600 dark:text-blue-400 flex items-center hover:underline">
-                            <span className="font-medium mr-1">{countStudyPairsInFolder(item.id)}</span> study items
-                          </a>
-                        </div>
-                      </CardContent>
-                      <CardFooter className="pt-2 flex justify-end gap-2">
-                        <Button variant="ghost" size="sm" onClick={() => {
-                          onStudyNote(item.id, "quiz")
-                        }} disabled={notes.filter((note: any) => note.folderId === item.id).length === 0}>
-                          <GraduationCap className="w-3 h-3 mr-1" /> Study
-                        </Button>
-                      </CardFooter>
-                    </Card>
-                  )
-                )}
-                {recentItems.length === 0 && (
-                  <div className="col-span-3 text-center py-12">
-                    <p className="text-gray-500 mb-4">No recent notes or folders. Create your first note or folder to get started!</p>
-                    <Button onClick={onCreateNote}>
-                      <Plus className="w-4 h-4 mr-2" /> Create Note
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="study" className="mt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {/* Show folder study history first */}
-              {folders.map((folder) => {
-                const session = folderTestSessions[folder.id]
-                if (!session) return null
-                const folderNotes = notes.filter(note => note.folderId === folder.id)
-                return (
-                  <Card key={folder.id} className="overflow-hidden">
-                    <CardHeader className="pb-2">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <CardTitle className="text-lg flex items-center gap-2">
-                            <FolderIcon className="w-4 h-4 text-black" />
-                            {folder.name}
-                          </CardTitle>
-                          <CardDescription>Folder Study Session</CardDescription>
-                        </div>
-                        <Badge variant="outline" className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3" /> <TimeSince timestamp={session.startTime} />
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="pb-2">
-                      <div className="grid grid-cols-3 gap-4 mb-3">
-                        <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
-                          <div className="text-xs text-gray-500 mb-1">Flashcards</div>
-                          <div className="text-lg font-bold">{countStudyPairsInFolder(folder.id)}</div>
-                        </div>
-                        <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
-                          <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
-                          <div className="text-lg font-bold">{folderQuizSessions[folder.id]?.score !== undefined ? `${folderQuizSessions[folder.id].score}%` : '-'}</div>
-                        </div>
-                        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
-                          <div className="text-xs text-gray-500 mb-1">Test Score</div>
-                          <div className="text-lg font-bold">{session.score}%</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Progress value={session.score} className="h-2 flex-1" />
-                        <span className="text-xs text-gray-500">Test</span>
-                      </div>
-                    </CardContent>
-                    <CardFooter className="pt-2 flex justify-end gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(folder.id, "quiz")}
-                        disabled={folderNotes.length === 0}>
-                        <GraduationCap className="w-3 h-3 mr-1" /> Study
-                      </Button>
-                    </CardFooter>
-                  </Card>
-                )
-              })}
-              {/* Show note study history as before, but add Test Score */}
-              {studyNotes.map((note) => (
-                <Card key={note.id} className="overflow-hidden">
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-4">Recent</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {recentItems.map(({ type, item }) =>
+              type === "note" ? (
+                <Card key={item.id} className="flex flex-col h-full overflow-hidden">
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start">
                       <div>
                         <CardTitle className="text-lg flex items-center gap-2">
                           <FileText className="w-4 h-4 text-black" />
-                          {note.title}
+                          {item.title}
                         </CardTitle>
-                        <CardDescription>{getFolderName(note.folderId)}</CardDescription>
+                        <CardDescription>{getFolderName(item.folderId)}</CardDescription>
                       </div>
                       <Badge variant="outline" className="flex items-center gap-1">
-                        <Calendar className="w-3 h-3" /> <TimeSince timestamp={note.lastStudied || 0} />
+                        <Clock className="w-3 h-3" /> <TimeSince timestamp={item.updatedAt} />
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="pb-2">
-                    <div className="grid grid-cols-3 gap-4 mb-3">
-                      <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
-                        <div className="text-xs text-gray-500 mb-1">Flashcards</div>
-                        <div className="text-lg font-bold">{countStudyPairs(note)}</div>
-                      </div>
-                      <div className="bg-green-50 dark:bg-green-900/20 p-2 rounded">
-                        <div className="text-xs text-gray-500 mb-1">Quiz Score</div>
-                        <div className="text-lg font-bold">{getStudyProgress(note)}%</div>
-                      </div>
-                      <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded">
-                        <div className="text-xs text-gray-500 mb-1">Test Score</div>
-                        <div className="text-lg font-bold">{noteTestSessions[note.id]?.score !== undefined ? `${noteTestSessions[note.id].score}%` : '-'}</div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Progress value={getStudyProgress(note)} className="h-2 flex-1" />
-                      <span className="text-xs text-gray-500">
-                        {note.studyStats?.quizCorrect || 0}/{note.studyStats?.quizAttempts || 0}
-                      </span>
-                    </div>
-                  </CardContent>
-                  <CardFooter className="pt-2 flex justify-between">
-                    <Button variant="outline" size="sm" onClick={() => onOpenNote(note)}>
-                      <Edit className="w-3 h-3 mr-1" /> Edit
-                    </Button>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "flashcards")}>
-                        <BookOpen className="w-3 h-3 mr-1" /> Cards
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "quiz")}>
-                        <Brain className="w-3 h-3 mr-1" /> Quiz
-                      </Button>
-                    </div>
-                  </CardFooter>
-                </Card>
-              ))}
-              {studyNotes.length === 0 && (
-                <div className="col-span-3 text-center py-12">
-                  <p className="text-gray-500 mb-4">No study history yet. Start studying your notes!</p>
-                  {notes.length > 0 ? (
-                    <Button onClick={() => onStudyNote(notes[0], "flashcards")}>
-                      <BookOpen className="w-4 h-4 mr-2" /> Start Studying
-                    </Button>
-                  ) : (
-                    <Button onClick={onCreateNote}>
-                      <Plus className="w-4 h-4 mr-2" /> Create Note
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="review" className="mt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {needsReviewNotes.map((note) => (
-                <Card key={note.id} className="overflow-hidden">
-                  <CardHeader className="pb-2">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-black" />
-                          {note.title}
-                        </CardTitle>
-                        <CardDescription>{getFolderName(note.folderId)}</CardDescription>
-                      </div>
-                      <Badge variant="outline" className="flex items-center gap-1">
-                        <Tag className="w-3 h-3" /> {note.tags && note.tags.length > 0 ? note.tags[0] : "No tags"}
-                      </Badge>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pb-2">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="bg-blue-50 dark:bg-blue-900/20 p-2 rounded flex-1 text-center">
-                        <div className="text-xs text-gray-500 mb-1">Study Items</div>
-                        <div className="text-lg font-bold">{countStudyPairs(note)}</div>
-                      </div>
-                      {note.lastStudied ? (
-                        <div className="bg-amber-50 dark:bg-amber-900/20 p-2 rounded flex-1 text-center">
-                          <div className="text-xs text-gray-500 mb-1">Last Studied</div>
-                          <div className="text-sm font-medium"><TimeSince timestamp={note.lastStudied} /></div>
-                        </div>
+                  <CardContent className="flex-1 pb-2">
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {item.tags && item.tags.length > 0 ? (
+                        item.tags.map((tag: any) => (
+                          <Badge key={tag} variant="secondary" className="text-xs">
+                            {tag}
+                          </Badge>
+                        ))
                       ) : (
-                        <div className="bg-red-50 dark:bg-red-900/20 p-2 rounded flex-1 text-center">
-                          <div className="text-xs text-gray-500 mb-1">Status</div>
-                          <div className="text-sm font-medium">Never studied</div>
-                        </div>
+                        <Badge variant="secondary" className="text-xs">No tags</Badge>
                       )}
                     </div>
                     <p className="text-sm text-gray-500 line-clamp-2">
-                      {note.blocks.find((b) => b.type === "who")?.content || "No content"}
+                      {item.blocks.find((b: any) => b.type === "note")?.content ||
+                        item.blocks.find((b: any) => b.type === "what")?.content ||
+                        "No content"}
                     </p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center">
+                        <span className="font-medium mr-1">{countStudyPairs(item)}</span> study items
+                      </div>
+                      {item.studyStats?.quizAttempts ? (
+                        <div className="text-xs text-green-600 dark:text-green-400 flex items-center">
+                          <span className="font-medium mr-1">{getStudyProgress(item)}%</span> quiz score
+                        </div>
+                      ) : null}
+                      {noteTestSessions[item.id]?.score !== undefined && (
+                        <div className="text-xs text-yellow-600 dark:text-yellow-400 flex items-center">
+                          <span className="font-medium mr-1">{noteTestSessions[item.id].score}%</span> test score
+                        </div>
+                      )}
+                    </div>
                   </CardContent>
                   <CardFooter className="pt-2 flex justify-between">
-                    <Button variant="outline" size="sm" onClick={() => onOpenNote(note)}>
+                    <Button variant="outline" size="sm" onClick={() => onOpenNote(item)}>
                       <Edit className="w-3 h-3 mr-1" /> Edit
                     </Button>
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "flashcards")}>
-                        <BookOpen className="w-3 h-3 mr-1" /> Cards
+                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(item, "flashcards")}>
+                        <Layers className="w-4 h-4 mr-1" /> Cards
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(note, "quiz")}>
-                        <Brain className="w-3 h-3 mr-1" /> Quiz
+                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(item, "quiz")}>
+                        <ListChecks className="w-4 h-4 mr-1" /> Quiz
                       </Button>
                     </div>
                   </CardFooter>
                 </Card>
-              ))}
-              {needsReviewNotes.length === 0 && (
-                <div className="col-span-3 text-center py-12">
-                  <p className="text-gray-500 mb-4">No notes need review. Create notes with WHO/WHAT pairs to study!</p>
-                  <Button onClick={onCreateNote}>
-                    <Plus className="w-4 h-4 mr-2" /> Create Note
-                  </Button>
-                </div>
-              )}
-            </div>
-          </TabsContent>
-        </Tabs>
+              ) : (
+                <Card key={item.id} className="flex flex-col h-full overflow-hidden">
+                  <CardHeader className="pb-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <FolderIcon className="w-4 h-4 text-black" />
+                          {item.name}
+                        </CardTitle>
+                        <CardDescription>
+                          {notes.filter((note: any) => note.folderId === item.id).length} notes
+                        </CardDescription>
+                        {item.description && (
+                          <div className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</div>
+                        )}
+                      </div>
+                      <Badge variant="outline" className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {typeof item.createdAt === 'number' && item.createdAt > 0 ? <TimeSince timestamp={item.createdAt} /> : <span>Unknown</span>}
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="flex-1 pb-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <a href="#" className="text-xs text-blue-600 dark:text-blue-400 flex items-center hover:underline">
+                        <span className="font-medium mr-1">{countStudyPairsInFolder(item.id)}</span> study items
+                      </a>
+                    </div>
+                  </CardContent>
+                  <CardFooter className="pt-2 flex justify-end gap-2">
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      onStudyNote(item.id, "quiz")
+                    }} disabled={notes.filter((note: any) => note.folderId === item.id).length === 0}>
+                      <GraduationCap className="w-3 h-3 mr-1" /> Study
+                    </Button>
+                  </CardFooter>
+                </Card>
+              )
+            )}
+            {recentItems.length === 0 && (
+              <div className="col-span-3 text-center py-12">
+                <p className="text-gray-500 mb-4">No recent notes or folders. Create your first note or folder to get started!</p>
+                <Button onClick={onCreateNote}>
+                  <Plus className="w-4 h-4 mr-2" /> Create Note
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

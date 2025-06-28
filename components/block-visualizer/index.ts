@@ -1,5 +1,5 @@
 export * from "./BlockVisualizer"
 export * from "./D3BlockVisualizer"
 export * from "./ClusteredForceGraph"
-export * from "./TreeVisualizer"
-export * from "./ReactFlowTreeVisualizer" 
+export * from "./ReactFlowTreeVisualizer"
+export * from "./BlockNavigationCard"
