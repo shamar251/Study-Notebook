@@ -5,6 +5,185 @@ import type { Block } from "./db"
  * Handles WHO-WHAT connections, sequential WHAT connections, and connection validation
  */
 export class BlockConnectionManager {
+  // Web Worker for heavy calculations
+  private static worker: Worker | null = null;
+  private static workerReady = false;
+
+  /**
+   * Initialize web worker for heavy calculations
+   */
+  private static initWorker() {
+    if (typeof window === 'undefined' || this.worker) return;
+
+    try {
+      // Create worker with heavy calculation logic
+      const workerCode = `
+        self.onmessage = function(e) {
+          const { type, data } = e.data;
+          
+          switch (type) {
+            case 'computeGroups':
+              const { blocks } = data;
+              const groups = computeGroups(blocks);
+              self.postMessage({ type: 'groupsResult', data: groups });
+              break;
+            case 'validateConnections':
+              const { blocks: blocksToValidate } = data;
+              const validation = validateConnections(blocksToValidate);
+              self.postMessage({ type: 'validationResult', data: validation });
+              break;
+          }
+        };
+
+        function computeGroups(blocks) {
+          const groupMap = {};
+          const visited = new Set();
+
+          function traverseAndMark(startBlock, groupId) {
+            const stack = [startBlock];
+            while (stack.length > 0) {
+              const block = stack.pop();
+              if (visited.has(block.id)) continue;
+              visited.add(block.id);
+              groupMap[block.id] = groupId;
+
+              (block.linkedBlockIds || []).forEach(id => {
+                const next = blocks.find(x => x.id === id);
+                if (next && !visited.has(next.id)) {
+                  stack.push(next);
+                }
+              });
+
+              blocks.forEach(x => {
+                if (x.linkedBlockIds && x.linkedBlockIds.includes(block.id) && !visited.has(x.id)) {
+                  stack.push(x);
+                }
+              });
+            }
+          }
+
+          blocks.forEach(block => {
+            if (visited.has(block.id)) return;
+            traverseAndMark(block, block.id);
+          });
+
+          return groupMap;
+        }
+
+        function validateConnections(blocks) {
+          const errors = [];
+          const visited = new Set();
+
+          function hasCircularReference(block) {
+            if (visited.has(block.id)) return true;
+            visited.add(block.id);
+
+            if (block.linkedBlockIds) {
+              for (const linkedId of block.linkedBlockIds) {
+                const linkedBlock = blocks.find(b => b.id === linkedId);
+                if (linkedBlock && hasCircularReference(linkedBlock)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          }
+
+          for (const block of blocks) {
+            if (block.linkedBlockIds) {
+              for (const linkedId of block.linkedBlockIds) {
+                const linkedBlock = blocks.find(b => b.id === linkedId);
+                if (!linkedBlock) {
+                  errors.push(\`Block \${block.id} links to non-existent block \${linkedId}\`);
+                }
+              }
+
+              visited.clear();
+              if (hasCircularReference(block)) {
+                errors.push(\`Circular reference detected in block \${block.id}\`);
+              }
+            }
+          }
+
+          return { isValid: errors.length === 0, errors };
+        }
+      `;
+
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      this.worker = new Worker(URL.createObjectURL(blob));
+      this.workerReady = true;
+    } catch (error) {
+      console.warn('Web Worker not available, falling back to main thread:', error);
+      this.workerReady = false;
+    }
+  }
+
+  /**
+   * Compute groups using web worker if available, fallback to main thread
+   */
+  static async computeGroupsAsync(blocks: Block[]): Promise<Record<string, string>> {
+    if (!this.workerReady) {
+      this.initWorker();
+    }
+
+    if (!this.worker || !this.workerReady) {
+      // Fallback to main thread
+      return this.computeGroupsSync(blocks);
+    }
+
+    return new Promise((resolve) => {
+      const messageHandler = (e: MessageEvent) => {
+        if (e.data.type === 'groupsResult') {
+          this.worker?.removeEventListener('message', messageHandler);
+          resolve(e.data.data);
+        }
+      };
+
+      this.worker?.addEventListener('message', messageHandler);
+      this.worker?.postMessage({ type: 'computeGroups', data: { blocks } });
+    });
+  }
+
+  /**
+   * Synchronous group computation (fallback)
+   */
+  private static computeGroupsSync(blocks: Block[]): Record<string, string> {
+    const groupMap: Record<string, string> = {};
+    const visited = new Set<string>();
+
+    const traverseAndMark = (startBlock: Block, groupId: string) => {
+      const stack: Block[] = [startBlock];
+
+      while (stack.length > 0) {
+        const block = stack.pop()!;
+        if (visited.has(block.id)) continue;
+
+        visited.add(block.id);
+        groupMap[block.id] = groupId;
+
+        (block.linkedBlockIds || []).forEach(id => {
+          const next = blocks.find(x => x.id === id);
+          if (next && !visited.has(next.id)) {
+            stack.push(next);
+          }
+        });
+
+        blocks.forEach(x => {
+          if (x.linkedBlockIds?.includes(block.id) && !visited.has(x.id)) {
+            stack.push(x);
+          }
+        });
+      }
+    };
+
+    blocks.forEach(block => {
+      if (visited.has(block.id)) return;
+      traverseAndMark(block, block.id);
+    });
+
+    return groupMap;
+  }
+
   /**
    * Check if a WHO block is connected to any WHAT blocks
    * Supports both new (linkedBlockIds) and old (adjacent) connection structures

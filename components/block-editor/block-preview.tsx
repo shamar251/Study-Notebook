@@ -100,9 +100,15 @@ export const BlockPreview = React.memo(function BlockPreview({ block, index }: B
             {block.content && (
               <div className="mt-2">
                 <img
-                  src={block.content || "/placeholder.svg?height=200&width=400"}
+                  src={block.content}
                   alt="Note image"
                   className="max-w-full h-auto rounded-md"
+                  loading="lazy"
+                  decoding="async"
+                  style={{
+                    contain: 'layout style',
+                    willChange: 'auto'
+                  }}
                 />
               </div>
             )}

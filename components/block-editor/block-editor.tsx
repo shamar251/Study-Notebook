@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useMemo, useCallback } from "react"
+import React, { useMemo, useCallback, useState, useEffect, useRef } from "react"
 import { X, FunctionSquare, Link as LinkIcon, Shuffle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -58,6 +58,119 @@ interface BlockEditorProps {
   onDoubleClick?: (block: Block) => void
   onSelectExistingWhereBlock?: (targetBlockId: string, referenceBlock: Block) => void
 }
+
+// Lazy loading hook for images
+const useLazyImage = (src: string | undefined, threshold: number = 0.1) => {
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [isInView, setIsInView] = useState(false);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number, height: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    if (!src || !imgRef.current) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsInView(true);
+          observer.disconnect();
+        }
+      },
+      {
+        threshold,
+        rootMargin: '200px 0px' // Start loading 200px before the image comes into view
+      }
+    );
+
+    observer.observe(imgRef.current);
+    return () => observer.disconnect();
+  }, [src, threshold]);
+
+  useEffect(() => {
+    if (!isInView || !src) return;
+
+    const img = new Image();
+    img.onload = () => {
+      setIsLoaded(true);
+      setImageDimensions({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.src = src;
+
+    return () => {
+      img.onload = null;
+    };
+  }, [isInView, src]);
+
+  return { imgRef, isLoaded, isInView, imageDimensions };
+};
+
+// Lazy image renderer component
+const LazyImageRenderer = React.memo(({
+  src,
+  alt,
+  onRemove
+}: {
+  src: string;
+  alt: string;
+  onRemove: () => void;
+}) => {
+  const { imgRef, isLoaded, isInView, imageDimensions } = useLazyImage(src);
+
+  // Calculate placeholder height based on image dimensions or use default
+  const placeholderHeight = imageDimensions
+    ? Math.min(400, Math.max(200, (imageDimensions.height / imageDimensions.width) * 400))
+    : 200;
+
+  return (
+    <div className="mt-2 relative group" style={{ minHeight: placeholderHeight }}>
+      {!isInView && (
+        <div
+          ref={imgRef}
+          className="max-w-full bg-gray-100 dark:bg-gray-800 rounded-md flex items-center justify-center"
+          style={{ height: placeholderHeight }}
+        >
+          <span className="text-gray-500 text-sm">Loading image...</span>
+        </div>
+      )}
+      {isInView && !isLoaded && (
+        <div
+          className="max-w-full bg-gray-100 dark:bg-gray-800 rounded-md flex items-center justify-center"
+          style={{ height: placeholderHeight }}
+        >
+          <div className="flex items-center space-x-2">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-500"></div>
+            <span className="text-gray-500 text-sm">Loading image...</span>
+          </div>
+        </div>
+      )}
+      {isLoaded && (
+        <img
+          src={src}
+          alt={alt}
+          className="max-w-full h-auto rounded-md"
+          style={{
+            contain: 'layout style',
+            willChange: 'auto'
+          }}
+          loading="lazy"
+          decoding="async"
+        />
+      )}
+      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
+          onClick={onRemove}
+        >
+          <X className="w-4 h-4" />
+        </Button>
+      </div>
+    </div>
+  );
+});
+
+LazyImageRenderer.displayName = 'LazyImageRenderer';
 
 // Helper to determine if this block is in a linked group (any type of connection)
 function isBlockInLinkedGroup(block: Block, allBlocks: Block[]): boolean {
@@ -255,23 +368,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               </div>
             </div>
             {block.image && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.image}
-                  alt="Block image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={handleRemoveBlockImage}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.image}
+                alt="Block image"
+                onRemove={handleRemoveBlockImage}
+              />
             )}
           </div>
         )
@@ -291,23 +392,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               </div>
             </div>
             {block.image && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.image}
-                  alt="Block image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={handleRemoveBlockImage}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.image}
+                alt="Block image"
+                onRemove={handleRemoveBlockImage}
+              />
             )}
           </div>
         )
@@ -322,23 +411,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               onPaste={handlePaste}
             />
             {block.image && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.image}
-                  alt="Block image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={handleRemoveBlockImage}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.image}
+                alt="Block image"
+                onRemove={handleRemoveBlockImage}
+              />
             )}
           </div>
         )
@@ -356,23 +433,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               />
             )}
             {block.content && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.content}
-                  alt="Note image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => handleUpdateBlock(block.id, "")}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.content}
+                alt="Note image"
+                onRemove={() => handleUpdateBlock(block.id, "")}
+              />
             )}
           </div>
         )
@@ -395,23 +460,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               </div>
             )}
             {block.content && block.content.startsWith('data:image') && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.content}
-                  alt="Note image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => handleUpdateBlock(block.id, "")}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.content}
+                alt="Note image"
+                onRemove={() => handleUpdateBlock(block.id, "")}
+              />
             )}
           </div>
         )
@@ -435,23 +488,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
             />
             {block.content && block.content.startsWith('data:image') && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.content}
-                  alt="Note image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={() => handleUpdateBlock(block.id, "")}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.content}
+                alt="Note image"
+                onRemove={() => handleUpdateBlock(block.id, "")}
+              />
             )}
           </div>
         )
@@ -501,23 +542,11 @@ export const BlockEditor = React.memo(function BlockEditor({
               </div>
             </div>
             {block.image && (
-              <div className="mt-2 relative group">
-                <img
-                  src={block.image}
-                  alt="Block image"
-                  className="max-w-full h-auto rounded-md"
-                />
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 bg-white/80 hover:bg-white dark:bg-gray-800/80 dark:hover:bg-gray-800"
-                    onClick={handleRemoveBlockImage}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <LazyImageRenderer
+                src={block.image}
+                alt="Block image"
+                onRemove={handleRemoveBlockImage}
+              />
             )}
           </div>
         )

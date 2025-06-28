@@ -49,6 +49,7 @@ export default function NoteApp() {
   const { theme, setTheme } = useTheme();
   const [visualizationMode, setVisualizationMode] = useState<'clustered' | 'classic' | 'tree' | 'reactflow'>('clustered');
   const [testTarget, setTestTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
+  const [quizTarget, setQuizTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
 
   useEffect(() => {
     // Initialize database with default data if empty
@@ -774,6 +775,22 @@ export default function NoteApp() {
     await updateNoteHandler(updatedNote);
   };
 
+  // Handler for Test tab/button
+  const handleTestTab = () => {
+    if (activeNote) {
+      setTestTarget({ type: 'note', note: activeNote });
+      setView('test');
+    }
+  };
+
+  // Handler for Quiz tab/button
+  const handleQuizTab = () => {
+    if (activeNote) {
+      setQuizTarget({ type: 'note', note: activeNote });
+      setView('quiz');
+    }
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex h-screen overflow-hidden">
@@ -862,8 +879,8 @@ export default function NoteApp() {
                     <TabsTrigger value="view">View Mode</TabsTrigger>
                     <TabsTrigger value="editor">Editor</TabsTrigger>
                     <TabsTrigger value="flashcards">Flashcards</TabsTrigger>
-                    <TabsTrigger value="quiz">Quiz</TabsTrigger>
-                    <TabsTrigger value="test">Test</TabsTrigger>
+                    <TabsTrigger value="quiz" onClick={handleQuizTab} disabled={!activeNote}>Quiz</TabsTrigger>
+                    <TabsTrigger value="test" onClick={handleTestTab} disabled={!activeNote}>Test</TabsTrigger>
                   </TabsList>
                   <div className="flex items-center">
                     <DropdownMenu>

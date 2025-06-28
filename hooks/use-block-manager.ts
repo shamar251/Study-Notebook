@@ -362,9 +362,34 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
       if (effectiveAfterBlockId) {
         const afterBlock = blocks.find(b => b.id === effectiveAfterBlockId);
         if (!afterBlock) return;
-        const group = getConnectedGroup(afterBlock, blocks);
+
+        // Optimized group finding - avoid expensive getConnectedGroup call
+        const visited = new Set<string>();
+        const groupBlocks: Block[] = [];
+
+        const traverse = (currentBlock: Block) => {
+          if (visited.has(currentBlock.id)) return;
+          visited.add(currentBlock.id);
+          groupBlocks.push(currentBlock);
+
+          // Forward connections
+          (currentBlock.linkedBlockIds || []).forEach(id => {
+            const next = blocks.find(x => x.id === id);
+            if (next) traverse(next);
+          });
+
+          // Backward connections
+          blocks.forEach(x => {
+            if (x.linkedBlockIds?.includes(currentBlock.id) && !visited.has(x.id)) {
+              traverse(x);
+            }
+          });
+        };
+
+        traverse(afterBlock);
+
         // Find all HOW blocks in this group
-        const groupHowBlocks = group.filter(b => b.type === "how");
+        const groupHowBlocks = groupBlocks.filter(b => b.type === "how");
         if (groupHowBlocks.length > 0) {
           // Insert after the last HOW block in this group
           const lastHowBlock = groupHowBlocks[groupHowBlocks.length - 1];
@@ -455,8 +480,33 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
     if (effectiveAfterBlockId) {
       const afterBlock = blocks.find(b => b.id === effectiveAfterBlockId);
       if (!afterBlock) return;
-      const group = getConnectedGroup(afterBlock, blocks);
-      const groupIds = group.map(b => b.id);
+
+      // Optimized group finding - avoid expensive getConnectedGroup call
+      const visited = new Set<string>();
+      const groupBlocks: Block[] = [];
+
+      const traverse = (currentBlock: Block) => {
+        if (visited.has(currentBlock.id)) return;
+        visited.add(currentBlock.id);
+        groupBlocks.push(currentBlock);
+
+        // Forward connections
+        (currentBlock.linkedBlockIds || []).forEach(id => {
+          const next = blocks.find(x => x.id === id);
+          if (next) traverse(next);
+        });
+
+        // Backward connections
+        blocks.forEach(x => {
+          if (x.linkedBlockIds?.includes(currentBlock.id) && !visited.has(x.id)) {
+            traverse(x);
+          }
+        });
+      };
+
+      traverse(afterBlock);
+
+      const groupIds = groupBlocks.map(b => b.id);
       const idxInGroup = groupIds.indexOf(effectiveAfterBlockId);
       const idxInBlocks = blocks.findIndex(b => b.id === effectiveAfterBlockId);
       if (idxInGroup === -1 || idxInBlocks === -1) return;
@@ -468,7 +518,7 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
           return next && next.type === "how";
         });
         if (isHowChain) {
-          const lastBlockInGroup = group[group.length - 1];
+          const lastBlockInGroup = groupBlocks[groupBlocks.length - 1];
           const idxLastInBlocks = blocks.findIndex(b => b.id === lastBlockInGroup.id);
           newBlock = {
             id: `block-${Date.now()}`,

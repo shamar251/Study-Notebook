@@ -21,6 +21,7 @@ import { BlockConnectionManager } from "@/lib/block-connections"
 import { getConnectedGroup } from "@/hooks/use-block-connections"
 import { GroupDetailModal } from "@/components/block-visualizer/GroupDetailModal"
 import { BlockDetailCard } from "@/components/block-visualizer/BlockDetailCard"
+import { Virtuoso } from 'react-virtuoso'
 
 interface EditorProps {
   note: Note
@@ -43,7 +44,6 @@ export default function Editor({ note, updateNote }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const [groupModal, setGroupModal] = useState<{ groupBlocks: Block[], selectedBlock: Block } | null>(null);
   const [blockDetailCardBlock, setBlockDetailCardBlock] = useState<Block | null>(null);
-  const [isLoading, setIsLoading] = useState(true)
   const [isScrolling, setIsScrolling] = useState(false)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -59,41 +59,47 @@ export default function Editor({ note, updateNote }: EditorProps) {
 
   const { getExistingWhereBlocks } = useWhereBlock(blocks)
 
+  // Optimized initial load - only run migrations if absolutely necessary
   useEffect(() => {
     setTitle(note.title)
-    // Only run auto-fix if the note hasn't been processed before
-    if (!note.autoFixedLegacyLinks) {
-      // Use requestIdleCallback to run this in the background
-      if ('requestIdleCallback' in window) {
-        requestIdleCallback(() => {
-          const fixedBlocks = BlockConnectionManager.autoFixLegacyWhoWhatLinks(note.blocks)
+    setTags(note.tags || [])
+
+    // Only run auto-fix if the note hasn't been processed before AND has blocks
+    if (!note.autoFixedLegacyLinks && note.blocks.length > 0) {
+      // Set blocks immediately for fast initial render
+      setBlocks(note.blocks)
+
+      // Run migration in background with lower priority
+      const runMigration = () => {
+        const fixedBlocks = BlockConnectionManager.autoFixLegacyWhoWhatLinks(note.blocks)
+        if (JSON.stringify(fixedBlocks) !== JSON.stringify(note.blocks)) {
           setBlocks(fixedBlocks)
-          // Mark as processed to avoid future runs
           updateNote({
             ...note,
             autoFixedLegacyLinks: true,
             blocks: fixedBlocks
           })
-        })
-        // Set blocks immediately without fixing for faster initial render
-        setBlocks(note.blocks)
+        } else {
+          // No changes needed, just mark as processed
+          updateNote({
+            ...note,
+            autoFixedLegacyLinks: true
+          })
+        }
+      }
+
+      // Use requestIdleCallback with timeout for better performance
+      if ('requestIdleCallback' in window) {
+        requestIdleCallback(runMigration, { timeout: 2000 })
       } else {
-        // Fallback for browsers without requestIdleCallback
-        const fixedBlocks = BlockConnectionManager.autoFixLegacyWhoWhatLinks(note.blocks)
-        setBlocks(fixedBlocks)
-        updateNote({
-          ...note,
-          autoFixedLegacyLinks: true,
-          blocks: fixedBlocks
-        })
+        // Fallback: run after a short delay
+        setTimeout(runMigration, 100)
       }
     } else {
-      // Note already processed, set blocks directly
+      // Note already processed or no blocks, set blocks directly
       setBlocks(note.blocks)
     }
-    setTags(note.tags || [])
-    setIsLoading(false)
-  }, [note])
+  }, [note.id, note.title, note.tags, note.autoFixedLegacyLinks, note.blocks.length])
 
   useEffect(() => {
     if (editingTitle && titleInputRef.current) {
@@ -255,122 +261,6 @@ export default function Editor({ note, updateNote }: EditorProps) {
     // Keeping for backward compatibility but it does nothing
   }, [])
 
-  // On initial load, migrate what blocks with sequence mode to how blocks
-  useEffect(() => {
-    // Only run if this note hasn't been migrated yet
-    if (note.migratedToHow) {
-      return;
-    }
-
-    // Use requestIdleCallback to run migration in background
-    if ('requestIdleCallback' in window) {
-      requestIdleCallback(() => {
-        setBlocks((prevBlocks) => {
-          const migrated = [...prevBlocks];
-          let hasChanges = false;
-          let migratedCount = 0;
-
-          // More efficient migration: only process what blocks that need migration
-          const whatBlocksToMigrate = migrated.filter(block =>
-            block.type === "what" &&
-            block.linkedBlockIds &&
-            block.linkedBlockIds.length > 0 &&
-            !block.migratedToHow
-          );
-
-          if (whatBlocksToMigrate.length === 0) {
-            // No migration needed, just mark as migrated
-            updateNote({ ...note, migratedToHow: true });
-            return prevBlocks;
-          }
-
-          // Process only the blocks that need migration
-          for (const whatBlock of whatBlocksToMigrate) {
-            const blockIndex = migrated.findIndex(b => b.id === whatBlock.id);
-            if (blockIndex === -1) continue;
-
-            // Check if this what block is part of a sequence group
-            const group = getSequenceGroupBlocks(whatBlock, migrated);
-            if (group.length > 1) {
-              // Convert this what block to a how block
-              migrated[blockIndex] = {
-                ...whatBlock,
-                type: "how" as const,
-                migratedToHow: true,
-                sequenceMode: undefined,
-              };
-              hasChanges = true;
-              migratedCount++;
-            }
-          }
-
-          if (hasChanges) {
-            // Update the note with migrated blocks
-            const updatedNote = { ...note, migratedToHow: true, blocks: migrated };
-            updateNote(updatedNote);
-            return migrated;
-          } else {
-            // No changes needed, just mark as migrated
-            updateNote({ ...note, migratedToHow: true });
-            return prevBlocks;
-          }
-        });
-      });
-    } else {
-      // Fallback for browsers without requestIdleCallback
-      setBlocks((prevBlocks) => {
-        const migrated = [...prevBlocks];
-        let hasChanges = false;
-        let migratedCount = 0;
-
-        // More efficient migration: only process what blocks that need migration
-        const whatBlocksToMigrate = migrated.filter(block =>
-          block.type === "what" &&
-          block.linkedBlockIds &&
-          block.linkedBlockIds.length > 0 &&
-          !block.migratedToHow
-        );
-
-        if (whatBlocksToMigrate.length === 0) {
-          // No migration needed, just mark as migrated
-          updateNote({ ...note, migratedToHow: true });
-          return prevBlocks;
-        }
-
-        // Process only the blocks that need migration
-        for (const whatBlock of whatBlocksToMigrate) {
-          const blockIndex = migrated.findIndex(b => b.id === whatBlock.id);
-          if (blockIndex === -1) continue;
-
-          // Check if this what block is part of a sequence group
-          const group = getSequenceGroupBlocks(whatBlock, migrated);
-          if (group.length > 1) {
-            // Convert this what block to a how block
-            migrated[blockIndex] = {
-              ...whatBlock,
-              type: "how" as const,
-              migratedToHow: true,
-              sequenceMode: undefined,
-            };
-            hasChanges = true;
-            migratedCount++;
-          }
-        }
-
-        if (hasChanges) {
-          // Update the note with migrated blocks
-          const updatedNote = { ...note, migratedToHow: true, blocks: migrated };
-          updateNote(updatedNote);
-          return migrated;
-        } else {
-          // No changes needed, just mark as migrated
-          updateNote({ ...note, migratedToHow: true });
-          return prevBlocks;
-        }
-      });
-    }
-  }, [note.migratedToHow, note.id, updateNote]);
-
   // Optimized group map computation - compute all groups in a single pass
   const groupMap = useMemo(() => {
     const groupMap: Record<string, string> = {};
@@ -487,19 +377,63 @@ export default function Editor({ note, updateNote }: EditorProps) {
     }, 150) // Debounce scroll events
   }, [])
 
-  // Add scroll event listener
-  useEffect(() => {
-    const editor = editorRef.current
-    if (!editor) return
-
-    editor.addEventListener('scroll', handleScroll, { passive: true })
-    return () => {
-      editor.removeEventListener('scroll', handleScroll)
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current)
-      }
-    }
-  }, [handleScroll])
+  // Virtuoso item renderer
+  const renderGroup = useCallback((index: number) => {
+    const [groupId, groupBlocks] = groupedBlocks[index];
+    const groupContainerClass = "mb-4 px-4";
+    return (
+      <div key={groupId} className={groupContainerClass}>
+        {groupBlocks.map((block, blockIdx) => {
+          const shouldStick = groupBlocks.length > 1;
+          const isFirstWhoInGroup = block.type === "who" && block.id === groupId;
+          // Add extra top margin to the very first block in the list
+          const isFirstBlockOverall = index === 0 && blockIdx === 0;
+          const extraClass = isFirstBlockOverall ? "mt-6" : (isFirstWhoInGroup ? "mt-8" : "");
+          return (
+            <div
+              key={`${block.id}-${block.type}-${blockIdx}`}
+              className={`block-container ${shouldStick ? "mb-0" : "mb-2"} ${extraClass}`}
+              style={{ contain: 'layout style' }}
+            >
+              {previewMode === "edit" ? (
+                <MemoizedBlockEditor
+                  block={block}
+                  index={blocks.indexOf(block)}
+                  blocks={blocks}
+                  previewMode={previewMode}
+                  onUpdateBlock={blockManager.updateBlock}
+                  onUpdateBlockImmediate={blockManager.updateBlockImmediate}
+                  onDeleteBlock={blockManager.deleteBlock}
+                  onAddWhatBlock={blockManager.addWhatBlock}
+                  onToggleTruthState={blockManager.toggleTruthState}
+                  onRemoveBlockImage={blockManager.removeBlockImage}
+                  onUpdateBlockLanguage={blockManager.updateBlockLanguage}
+                  onPaste={handlePaste}
+                  isWhoBlockConnected={blockManager.isWhoBlockConnected}
+                  countConnectedWhatBlocks={blockManager.countConnectedWhatBlocks}
+                  countConnectedBlocks={blockManager.countConnectedBlocks}
+                  countAllLinkedBlocksInGroup={blockManager.countAllLinkedBlocksInGroup}
+                  getExistingWhereBlocks={getExistingWhereBlocks}
+                  onAddBlockAndConnect={blockManager.addBlockAfter}
+                  onConnectBlocks={blockManager.connectBlocks}
+                  onDisconnectBlocks={blockManager.disconnectBlocks}
+                  entityId={groupId}
+                  groupId={groupId}
+                  onDoubleClick={handleBlockDoubleClick}
+                  onSelectExistingWhereBlock={handleSelectExistingWhereBlock}
+                />
+              ) : (
+                <MemoizedBlockPreview
+                  block={block}
+                  index={blocks.indexOf(block)}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }, [groupedBlocks, previewMode, blocks, blockManager, getExistingWhereBlocks, handlePaste, handleBlockDoubleClick, handleSelectExistingWhereBlock]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -570,161 +504,61 @@ export default function Editor({ note, updateNote }: EditorProps) {
         </Popover>
       </div>
 
-      {/* Fixed scrolling container */}
-      <div
-        className={`flex-1 overflow-y-auto editor-container ${isScrolling ? 'scrolling' : ''}`}
-        ref={editorRef}
-        style={{
-          // Optimize scrolling performance
-          willChange: 'scroll-position',
-          transform: 'translateZ(0)', // Force hardware acceleration
-          backfaceVisibility: 'hidden', // Optimize rendering
-        }}
-      >
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-              <p className="text-muted-foreground">Loading editor...</p>
-            </div>
-          </div>
-        ) : (
-          <div className="w-full px-4" style={{ contain: 'layout style paint' }}>
-            <div>
-              {groupedBlocks.map(([groupId, groupBlocks]) => {
-                // Remove background and border from group container, keep only spacing
-                const groupContainerClass = "mb-4";
-                return (
-                  <div key={groupId} className={groupContainerClass}>
-                    {groupBlocks.map((block, index) => {
-                      const shouldStick = groupBlocks.length > 1;
-                      const isFirstWhoInGroup = block.type === "who" && block.id === groupId;
-                      const extraClass = isFirstWhoInGroup ? "mt-8" : "";
-                      // Remove border radius from block
-                      return (
-                        <div
-                          key={`${block.id}-${block.type}-${index}`}
-                          className={`block-container ${shouldStick ? "mb-0" : "mb-2"} ${extraClass}`}
-                          style={{ contain: 'layout style' }}
-                        >
-                          {previewMode === "edit" ? (
-                            <MemoizedBlockEditor
-                              block={block}
-                              index={blocks.indexOf(block)}
-                              blocks={blocks}
-                              previewMode={previewMode}
-                              onUpdateBlock={blockManager.updateBlock}
-                              onUpdateBlockImmediate={blockManager.updateBlockImmediate}
-                              onDeleteBlock={blockManager.deleteBlock}
-                              onAddWhatBlock={blockManager.addWhatBlock}
-                              onToggleTruthState={blockManager.toggleTruthState}
-                              onRemoveBlockImage={blockManager.removeBlockImage}
-                              onUpdateBlockLanguage={blockManager.updateBlockLanguage}
-                              onPaste={handlePaste}
-                              isWhoBlockConnected={blockManager.isWhoBlockConnected}
-                              countConnectedWhatBlocks={blockManager.countConnectedWhatBlocks}
-                              countConnectedBlocks={blockManager.countConnectedBlocks}
-                              countAllLinkedBlocksInGroup={blockManager.countAllLinkedBlocksInGroup}
-                              getExistingWhereBlocks={getExistingWhereBlocks}
-                              onAddBlockAndConnect={blockManager.addBlockAfter}
-                              onConnectBlocks={blockManager.connectBlocks}
-                              onDisconnectBlocks={blockManager.disconnectBlocks}
-                              entityId={groupId}
-                              groupId={groupId}
-                              onDoubleClick={handleBlockDoubleClick}
-                              onSelectExistingWhereBlock={handleSelectExistingWhereBlock}
-                            />
-                          ) : (
-                            <MemoizedBlockPreview
-                              block={block}
-                              index={blocks.indexOf(block)}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Use centralized logic for unlinked WHO blocks */}
-            {unlinkedWhoBlocksCount > 0 && previewMode === "edit" && (
-              <Alert className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 mt-6">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <AlertDescription>
-                  You have {unlinkedWhoBlocksCount} WHO {unlinkedWhoBlocksCount === 1 ? "block" : "blocks"} without
-                  linked WHAT blocks. Add WHAT blocks to use them in study modes.
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {previewMode === "edit" && (
-              <div className="p-2 border-b flex flex-wrap gap-2 sticky top-0 bg-white dark:bg-gray-900 z-10">
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("who")}>
-                  <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-blue-100 dark:bg-blue-900 rounded">
-                    W
-                  </span>
-                  WHO Block
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("what")}>
-                  <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-green-100 dark:bg-green-900 rounded">
-                    ?
-                  </span>
-                  WHAT Block
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("how")}>
-                  <ArrowRight className="w-4 h-4 mr-2 text-orange-500" />
-                  HOW Block
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("where")}>
-                  <MapPin className="w-4 h-4 mr-2 text-teal-500" />
-                  Where Block
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("note")}>
-                  <FileText className="w-4 h-4 mr-2 text-purple-500" />
-                  NOTE Block
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("image")}>
-                  <ImageIcon className="w-4 h-4 mr-2 text-amber-500" />
-                  Image
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("video")}>
-                  <Video className="w-4 h-4 mr-2 text-red-500" />
-                  Video
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("code")}>
-                  <Code className="w-4 h-4 mr-2 text-gray-500" />
-                  Code
-                </Button>
-
-              </div>
-            )}
-          </div>
-        )}
-        {/* Render GroupDetailModal if open */}
-        {groupModal && (
-          <GroupDetailModal
-            groupBlocks={groupModal.groupBlocks}
-            onClose={() => setGroupModal(null)}
-            onSelectBlock={handleSelectBlockInModal}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 w-full" style={{ contain: 'layout style paint', height: '100%' }}>
+          <Virtuoso
+            style={{ height: '100%' }}
+            totalCount={groupedBlocks.length}
+            itemContent={renderGroup}
+            overscan={100}
           />
-        )}
-        {/* Render BlockDetailCard if open */}
-        {blockDetailCardBlock && (
-          <BlockDetailCard
-            block={blockDetailCardBlock}
-            onClose={handleCloseBlockDetailCard}
-            blocks={blocks}
-            onViewGroup={groupBlocks => {
-              setBlockDetailCardBlock(null);
-              setTimeout(() => {
-                setGroupModal({ groupBlocks, selectedBlock: groupBlocks[0] });
-              }, 0);
-            }}
-          />
+          {/* Use centralized logic for unlinked WHO blocks */}
+          {unlinkedWhoBlocksCount > 0 && previewMode === "edit" && (
+            <Alert className="bg-amber-50 dark:bg-amber-900/20 border-amber-200 mt-6">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertDescription>
+                You have {unlinkedWhoBlocksCount} WHO {unlinkedWhoBlocksCount === 1 ? "block" : "blocks"} without
+                linked WHAT blocks. Add WHAT blocks to use them in study modes.
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+        {/* Footer: Always visible, not inside Virtuoso */}
+        {previewMode === "edit" && (
+          <div className="p-2 ml-2 border-b flex flex-wrap gap-2 bg-white dark:bg-gray-900 z-10">
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("who")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-blue-100 dark:bg-blue-900 rounded">W</span> WHO Block </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("what")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-green-100 dark:bg-green-900 rounded">?</span> WHAT Block </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("how")}> <ArrowRight className="w-4 h-4 mr-2 text-orange-500" /> HOW Block </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("where")}> <MapPin className="w-4 h-4 mr-2 text-teal-500" /> Where Block </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("note")}> <FileText className="w-4 h-4 mr-2 text-purple-500" /> NOTE Block </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("image")}> <ImageIcon className="w-4 h-4 mr-2 text-amber-500" /> Image </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("video")}> <Video className="w-4 h-4 mr-2 text-red-500" /> Video </Button>
+            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("code")}> <Code className="w-4 h-4 mr-2 text-gray-500" /> Code </Button>
+          </div>
         )}
       </div>
+      {/* Render GroupDetailModal if open */}
+      {groupModal && (
+        <GroupDetailModal
+          groupBlocks={groupModal.groupBlocks}
+          onClose={() => setGroupModal(null)}
+          onSelectBlock={handleSelectBlockInModal}
+        />
+      )}
+      {/* Render BlockDetailCard if open */}
+      {blockDetailCardBlock && (
+        <BlockDetailCard
+          block={blockDetailCardBlock}
+          onClose={handleCloseBlockDetailCard}
+          blocks={blocks}
+          onViewGroup={groupBlocks => {
+            setBlockDetailCardBlock(null);
+            setTimeout(() => {
+              setGroupModal({ groupBlocks, selectedBlock: groupBlocks[0] });
+            }, 0);
+          }}
+        />
+      )}
     </div>
   )
 }

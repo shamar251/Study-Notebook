@@ -274,10 +274,10 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
   return (
     <div className="w-full" style={{ position: 'relative', display: 'flex', flexDirection: 'column', height: '98%' }}>
       <div className="mb-4 ml-4" style={{ flex: '0 0 auto' }}>
-        <h3 className="text-lg font-semibold mb-2 ">Clustered Force-Directed Graph</h3>
+        {/* <h3 className="text-lg font-semibold mb-1 ">Clustered Force-Directed Graph</h3>
         <p className="text-sm text-gray-600 mb-4">
           Nodes are grouped by connected clusters. Drag nodes to rearrange, scroll to zoom, and click a node for details.
-        </p>
+        </p> */}
       </div>
       <div className="h-full overflow-hidden bg-white" style={{ position: 'relative', flex: 1, minHeight: 0 }}>
         <svg
