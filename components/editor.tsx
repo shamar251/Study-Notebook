@@ -22,6 +22,7 @@ import { getConnectedGroup } from "@/hooks/use-block-connections"
 import { GroupDetailModal } from "@/components/block-visualizer/GroupDetailModal"
 import { BlockDetailCard } from "@/components/block-visualizer/BlockDetailCard"
 import { Virtuoso } from 'react-virtuoso'
+import type { VirtuosoHandle } from 'react-virtuoso'
 
 interface EditorProps {
   note: Note
@@ -46,6 +47,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
   const [blockDetailCardBlock, setBlockDetailCardBlock] = useState<Block | null>(null);
   const [isScrolling, setIsScrolling] = useState(false)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
   // Use the block manager hook
   const blockManager = useBlockManager({
@@ -435,6 +437,19 @@ export default function Editor({ note, updateNote }: EditorProps) {
     );
   }, [groupedBlocks, previewMode, blocks, blockManager, getExistingWhereBlocks, handlePaste, handleBlockDoubleClick, handleSelectExistingWhereBlock]);
 
+  // Shared handler for adding a block after another block (with scroll)
+  const handleAddBlockAfterWithScroll = useCallback((type: Block["type"], afterBlockId?: string) => {
+    blockManager.addBlockAfter(type, afterBlockId);
+    setTimeout(() => {
+      virtuosoRef.current?.scrollToIndex({ index: groupedBlocks.length });
+    }, 100);
+  }, [blockManager, groupedBlocks.length]);
+
+  // Use this handler for the footer buttons
+  const handleAddBlockAfter = useCallback((type: Block["type"]) => {
+    handleAddBlockAfterWithScroll(type);
+  }, [handleAddBlockAfterWithScroll]);
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center justify-between p-4 border-b">
@@ -507,6 +522,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 w-full" style={{ contain: 'layout style paint', height: '100%' }}>
           <Virtuoso
+            ref={virtuosoRef}
             style={{ height: '100%' }}
             totalCount={groupedBlocks.length}
             itemContent={renderGroup}
@@ -526,14 +542,14 @@ export default function Editor({ note, updateNote }: EditorProps) {
         {/* Footer: Always visible, not inside Virtuoso */}
         {previewMode === "edit" && (
           <div className="p-2 ml-2 border-b flex flex-wrap gap-2 bg-white dark:bg-gray-900 z-10">
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("who")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-blue-100 dark:bg-blue-900 rounded">W</span> WHO Block </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("what")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-green-100 dark:bg-green-900 rounded">?</span> WHAT Block </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("how")}> <ArrowRight className="w-4 h-4 mr-2 text-orange-500" /> HOW Block </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("where")}> <MapPin className="w-4 h-4 mr-2 text-teal-500" /> Where Block </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("note")}> <FileText className="w-4 h-4 mr-2 text-purple-500" /> NOTE Block </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("image")}> <ImageIcon className="w-4 h-4 mr-2 text-amber-500" /> Image </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("video")}> <Video className="w-4 h-4 mr-2 text-red-500" /> Video </Button>
-            <Button size="sm" variant="outline" onClick={() => blockManager.addBlockAfter("code")}> <Code className="w-4 h-4 mr-2 text-gray-500" /> Code </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("who")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-blue-100 dark:bg-blue-900 rounded">W</span> WHO Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("what")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-green-100 dark:bg-green-900 rounded">?</span> WHAT Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("how")}> <ArrowRight className="w-4 h-4 mr-2 text-orange-500" /> HOW Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("where")}> <MapPin className="w-4 h-4 mr-2 text-teal-500" /> Where Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("note")}> <FileText className="w-4 h-4 mr-2 text-purple-500" /> NOTE Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("image")}> <ImageIcon className="w-4 h-4 mr-2 text-amber-500" /> Image </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("video")}> <Video className="w-4 h-4 mr-2 text-red-500" /> Video </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("code")}> <Code className="w-4 h-4 mr-2 text-gray-500" /> Code </Button>
           </div>
         )}
       </div>
