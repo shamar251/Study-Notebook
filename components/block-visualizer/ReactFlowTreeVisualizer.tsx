@@ -29,6 +29,8 @@ const NODE_COLORS: Record<Block['type'], string> = {
   where: '#14b8a6',
   how: '#f97316',
   'where-ref': '#14b8a6',
+  why: '#6366f1',
+  when: '#ec4899',
 };
 
 interface ReactFlowTreeVisualizerProps {
@@ -40,22 +42,13 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
   const blockMap = new Map(blocks.map(b => [b.id, b]));
   const linked = new Set<string>();
   blocks.forEach(b => b.linkedBlockIds?.forEach(id => linked.add(id)));
-  // Only use non-'where-ref' blocks as roots
   const roots = blocks.filter(b => !linked.has(b.id) && b.type !== 'where-ref');
   const nodes: Node[] = [];
   const edges: Edge[] = [];
   let y = 0;
   function addNode(block: Block, parentId?: string, depth = 0, siblingIdx = 0, visited = new Set<string>()) {
-    if (visited.has(block.id)) return; // Prevent infinite recursion
+    if (visited.has(block.id)) return;
     visited.add(block.id);
-    if (block.type === 'where-ref' && block.whereBlockId) {
-      // Do not create a node for where-ref, just use the referenced where block
-      const referenced = blockMap.get(block.whereBlockId);
-      if (referenced) {
-        addNode(referenced, parentId, depth, siblingIdx, new Set(visited));
-      }
-      return;
-    }
     const nodeId = block.id;
     nodes.push({
       id: nodeId,
@@ -80,24 +73,21 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
       type: 'default',
     });
     if (parentId) {
-      edges.push({ id: `${parentId}->${nodeId}`, source: parentId, target: nodeId, animated: false });
+      const parentBlock = blockMap.get(parentId);
+      if (parentBlock) {
+        edges.push({ id: `${parentId}->${nodeId}`, source: parentId, target: nodeId, animated: false });
+      }
     }
     let childIdx = 0;
     (block.linkedBlockIds || []).forEach(childId => {
       const child = blockMap.get(childId);
-      if (child?.type === 'where-ref' && child.whereBlockId) {
-        const referenced = blockMap.get(child.whereBlockId);
-        if (referenced) {
-          addNode(referenced, nodeId, depth + 1, childIdx++, new Set(visited));
-        }
-      } else if (child) {
+      if (child) {
         addNode(child, nodeId, depth + 1, childIdx++, new Set(visited));
       }
     });
     y++;
   }
   if (roots.length > 1) {
-    // Virtual root
     const rootId = 'virtual-root';
     nodes.push({
       id: rootId,
@@ -122,7 +112,6 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
   } else if (roots.length === 1) {
     addNode(roots[0], undefined, 0, 0, new Set());
   }
-  // Deduplicate edges by id
   const uniqueEdges = Array.from(
     new Map(edges.map(e => [e.id, e])).values()
   );
@@ -150,6 +139,23 @@ const ReactFlowTreeVisualizerInner: React.FC<ReactFlowTreeVisualizerProps> = ({ 
     setSelectedBlockId(node.id);
   }, []);
 
+  // Handle group navigation
+  const handleNavigateToGroup = useCallback((groupBlocks: Block[]) => {
+    // Open the group detail modal AND center the view on the first block
+    setGroupModal(groupBlocks);
+
+    // Also center the view on the first block in the group
+    const firstBlock = groupBlocks[0];
+    if (firstBlock) {
+      setSelectedBlockId(firstBlock.id);
+      // Center the view on the node
+      const node = reactFlowInstance.getNode(firstBlock.id);
+      if (node && node.position) {
+        reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 500 });
+      }
+    }
+  }, [reactFlowInstance]);
+
   // Render overlays
   const renderOverlays = () => {
     if (groupModal) {
@@ -160,6 +166,11 @@ const ReactFlowTreeVisualizerInner: React.FC<ReactFlowTreeVisualizerProps> = ({ 
           onSelectBlock={b => {
             setSelectedBlockId(b.id);
             setGroupModal(null);
+            // Center the view on the selected block
+            const node = reactFlowInstance.getNode(b.id);
+            if (node && node.position) {
+              reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 500 });
+            }
           }}
         />
       );
@@ -206,6 +217,7 @@ const ReactFlowTreeVisualizerInner: React.FC<ReactFlowTreeVisualizerProps> = ({ 
             reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.2, duration: 500 });
           }
         }}
+        onNavigateToGroup={handleNavigateToGroup}
       />
     </div>
   );

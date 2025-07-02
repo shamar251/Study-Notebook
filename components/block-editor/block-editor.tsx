@@ -17,6 +17,8 @@ import {
   BLOCK_TYPE_BADGE_CLASSES
 } from "@/lib/block-types"
 import { WhereBlockEditor } from "./blocks/where-block-editor"
+import { WhyBlockEditor } from "./blocks/why-block-editor"
+import { WhenBlockEditor } from "./blocks/when-block-editor"
 import { BlockConnectionManager } from "@/lib/block-connections"
 import { BlockConnectionManager as BlockConnectionManagerUI } from "@/components/block-connection-manager"
 import { ConnectionOptions } from "@/components/connection-options"
@@ -550,6 +552,45 @@ export const BlockEditor = React.memo(function BlockEditor({
             )}
           </div>
         )
+      case "why":
+        return (
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-full min-w-[350px] md:min-w-[500px]">
+                <MathInput
+                  value={block.content || ''}
+                  onChange={(value: string) => handleUpdateBlock(block.id, value, block.math)}
+                  placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
+                  isMathMode={block.math}
+                  onPaste={handlePaste}
+                />
+              </div>
+            </div>
+            {block.image && (
+              <LazyImageRenderer
+                src={block.image}
+                alt="Block image"
+                onRemove={handleRemoveBlockImage}
+              />
+            )}
+          </div>
+        )
+      case "when": {
+        const handleUpdate = useCallback((
+          id: string,
+          content: string,
+          data?: any
+        ) => {
+          handleUpdateBlock(id, content, block.math)
+        }, [handleUpdateBlock, block.math]);
+
+        return (
+          <WhenBlockEditor
+            block={block}
+            onUpdateBlock={handleUpdate}
+          />
+        )
+      }
       default:
         return null
     }
@@ -589,7 +630,7 @@ export const BlockEditor = React.memo(function BlockEditor({
                 <span>{BLOCK_TYPE_LABELS[block.type]}</span>
               </Badge>
             )}
-            {(block.type === "who" || block.type === "what" || block.type === "note") && (
+            {(block.type === "who" || block.type === "what" || block.type === "note" || block.type === "why") && (
               <button
                 onClick={() => handleUpdateBlockImmediate()}
                 title={block.math ? "Math mode enabled" : "Enable math mode"}
@@ -606,7 +647,11 @@ export const BlockEditor = React.memo(function BlockEditor({
                         ? block.math
                           ? "bg-purple-100 border-purple-500 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200"
                           : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-                        : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                        : block.type === "why"
+                          ? block.math
+                            ? "bg-indigo-100 border-indigo-500 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200"
+                            : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                          : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
                   }`}
                 style={{ verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center' }}
               >

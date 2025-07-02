@@ -18,7 +18,8 @@ import {
   ChevronDown,
   User,
   HelpCircle,
-  ArrowRight
+  ArrowRight,
+  Clock
 } from "lucide-react"
 import type { Block } from "@/lib/db"
 import { BLOCK_TYPE_ICONS, BLOCK_TYPE_LABELS, BLOCK_TYPE_COLORS } from "@/lib/block-types"
@@ -86,8 +87,10 @@ export function ConnectionOptions({
     { type: "who", label: "WHO Block", icon: <User className="w-4 h-4" />, color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200" },
     { type: "what", label: "WHAT Block", icon: <HelpCircle className="w-4 h-4" />, color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200" },
     { type: "how", label: "HOW Block", icon: <ArrowRight className="w-4 h-4" />, color: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-200" },
+    { type: "why", label: "WHY Block", icon: <HelpCircle className="w-4 h-4" />, color: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200" },
     { type: "note", label: "Note Block", icon: <FileText className="w-4 h-4" />, color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200" },
     { type: "where", label: "Where Block", icon: <MapPin className="w-4 h-4" />, color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-200" },
+    { type: "when", label: "When Block", icon: <Clock className="w-4 h-4" />, color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-200" },
     { type: "image", label: "Image Block", icon: <ImageIcon className="w-4 h-4" />, color: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" },
     { type: "video", label: "Video Block", icon: <Video className="w-4 h-4" />, color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200" },
     { type: "code", label: "Code Block", icon: <Code className="w-4 h-4" />, color: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200" },

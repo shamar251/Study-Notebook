@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
-import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus, Link as LinkIcon, MapPin, ArrowRight } from "lucide-react"
+import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus, Link as LinkIcon, MapPin, ArrowRight, HelpCircle, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -16,6 +16,7 @@ import { BlockEditor } from "./block-editor/block-editor"
 import { BlockPreview } from "./block-editor/block-preview"
 import { useBlockManager } from "@/hooks/use-block-manager"
 import { useWhereBlock } from "@/hooks/use-where-block"
+import { useWhenBlock } from "@/hooks/use-when-block"
 import { BLOCK_TYPE_ICONS, BLOCK_TYPE_LABELS } from "@/lib/block-types"
 import { BlockConnectionManager } from "@/lib/block-connections"
 import { getConnectedGroup } from "@/hooks/use-block-connections"
@@ -60,6 +61,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
   })
 
   const { getExistingWhereBlocks } = useWhereBlock(blocks)
+  const { getExistingWhenBlocks } = useWhenBlock(blocks)
 
   // Optimized initial load - only run migrations if absolutely necessary
   useEffect(() => {
@@ -164,7 +166,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
           if (blockId) {
             setBlocks(blocks.map(block => {
               if (block.id !== blockId) return block;
-              if (block.type === "who" || block.type === "what" || block.type === "note") {
+              if (block.type === "who" || block.type === "what" || block.type === "note" || block.type === "why") {
                 return { ...block, image: base64Data };
               } else if (block.type === "image") {
                 return { ...block, content: base64Data };
@@ -270,26 +272,53 @@ export default function Editor({ note, updateNote }: EditorProps) {
 
     // Helper function to traverse and mark all connected blocks
     const traverseAndMark = (startBlock: Block, groupId: string) => {
+      // If this is a when block, only group with other when blocks
+      if (startBlock.type === "when") {
+        const stack: Block[] = [startBlock];
+        while (stack.length > 0) {
+          const block = stack.pop()!;
+          if (visited.has(block.id)) continue;
+          if (block.type !== "when") continue; // Only group with other when blocks
+          visited.add(block.id);
+          groupMap[block.id] = groupId;
+          // Add forward connections to other when blocks
+          (block.linkedBlockIds || []).forEach(id => {
+            const next = blocks.find(x => x.id === id && x.type === "when");
+            if (next && !visited.has(next.id)) {
+              stack.push(next);
+            }
+          });
+          // Add backward connections from other when blocks
+          blocks.forEach(x => {
+            if (x.type === "when" && x.linkedBlockIds?.includes(block.id) && !visited.has(x.id)) {
+              stack.push(x);
+            }
+          });
+        }
+        return;
+      }
+      // For all other blocks, group as before, but never with when blocks
       const stack: Block[] = [startBlock];
-
       while (stack.length > 0) {
         const block = stack.pop()!;
         if (visited.has(block.id)) continue;
-
+        if (block.type === "when") {
+          groupMap[block.id] = block.id;
+          visited.add(block.id);
+          continue;
+        }
         visited.add(block.id);
         groupMap[block.id] = groupId;
-
-        // Add forward connections
+        // Add forward connections (skip when)
         (block.linkedBlockIds || []).forEach(id => {
-          const next = blocks.find(x => x.id === id);
+          const next = blocks.find(x => x.id === id && x.type !== "when");
           if (next && !visited.has(next.id)) {
             stack.push(next);
           }
         });
-
-        // Add backward connections
+        // Add backward connections (skip when)
         blocks.forEach(x => {
-          if (x.linkedBlockIds?.includes(block.id) && !visited.has(x.id)) {
+          if (x.type !== "when" && x.linkedBlockIds?.includes(block.id) && !visited.has(x.id)) {
             stack.push(x);
           }
         });
@@ -299,9 +328,6 @@ export default function Editor({ note, updateNote }: EditorProps) {
     // Process all blocks
     for (const block of blocks) {
       if (visited.has(block.id)) continue;
-
-      // Use the block's ID as the group ID for single blocks
-      // For connected groups, use the first block's ID as the group ID
       traverseAndMark(block, block.id);
     }
 
@@ -544,8 +570,12 @@ export default function Editor({ note, updateNote }: EditorProps) {
           <div className="p-2 ml-2 border-b flex flex-wrap gap-2 bg-white dark:bg-gray-900 z-10">
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("who")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-blue-100 dark:bg-blue-900 rounded">W</span> WHO Block </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("what")}> <span className="w-4 h-4 mr-2 flex items-center justify-center text-xs font-bold bg-green-100 dark:bg-green-900 rounded">?</span> WHAT Block </Button>
-            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("how")}> <ArrowRight className="w-4 h-4 mr-2 text-orange-500" /> HOW Block </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("where")}> <MapPin className="w-4 h-4 mr-2 text-teal-500" /> Where Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("when")}> <Clock className="w-4 h-4 mr-2 text-pink-500" /> When Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("how")}> <ArrowRight className="w-4 h-4 mr-2 text-orange-500" /> HOW Block </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("why")}> <HelpCircle className="w-4 h-4 mr-2 text-indigo-500" /> WHY Block </Button>
+
+
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("note")}> <FileText className="w-4 h-4 mr-2 text-purple-500" /> NOTE Block </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("image")}> <ImageIcon className="w-4 h-4 mr-2 text-amber-500" /> Image </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("video")}> <Video className="w-4 h-4 mr-2 text-red-500" /> Video </Button>

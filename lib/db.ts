@@ -22,7 +22,7 @@ export interface Note {
 export interface Block {
   id: string;
   folderId?: number;
-  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how" | "where-ref";
+  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how" | "where-ref" | "why" | "when";
   content?: string;
   whereBlockId?: string;
   data?: any;
@@ -42,6 +42,11 @@ export interface Block {
     type: "text" | "coords"
     address?: string
     coordinates?: { lat: number; lon: number }
+  }
+  temporalReference?: {
+    type: "text" | "date" | "relative"
+    date?: string
+    relativeTime?: string
   }
 }
 

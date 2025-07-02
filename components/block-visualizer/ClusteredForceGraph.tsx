@@ -34,6 +34,8 @@ const NODE_COLORS: Record<Block['type'], string> = {
   where: '#14b8a6',
   how: '#f97316',
   'where-ref': '#14b8a6',
+  why: '#6366f1',
+  when: '#ec4899',
 };
 
 function previewText(content: string) {
@@ -253,6 +255,31 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
     return blocks.find(b => b.id === id);
   }
 
+  // Handle group navigation
+  const handleNavigateToGroup = (groupBlocks: Block[]) => {
+    // Open the group detail modal AND center the view on the first block
+    setGroupModal({ groupBlocks });
+
+    // Also center the view on the first block in the group
+    const firstBlock = groupBlocks[0];
+    if (firstBlock) {
+      const node = nodesRef.current.find(n => n.id === firstBlock.id);
+      if (node) {
+        setSelectedNode(node);
+        // Center the SVG view on the node
+        if (svgRef.current && node.x !== undefined && node.y !== undefined && zoomRef.current) {
+          const svg = d3.select(svgRef.current);
+          const svgWidth = svgRef.current.clientWidth;
+          const svgHeight = svgRef.current.clientHeight;
+          const scale = 1.2;
+          const tx = svgWidth / 2 - node.x * scale;
+          const ty = svgHeight / 2 - node.y * scale;
+          svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+        }
+      }
+    }
+  };
+
   // Card rendering (top right)
   const renderCard = () => {
     if (groupModal) {
@@ -263,6 +290,17 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
           onSelectBlock={b => {
             setSelectedNode(nodesRef.current.find(n => n.id === b.id) || null);
             setGroupModal(null);
+            // Center the SVG view on the selected block
+            const node = nodesRef.current.find(n => n.id === b.id);
+            if (node && svgRef.current && node.x !== undefined && node.y !== undefined && zoomRef.current) {
+              const svg = d3.select(svgRef.current);
+              const svgWidth = svgRef.current.clientWidth;
+              const svgHeight = svgRef.current.clientHeight;
+              const scale = 1.2;
+              const tx = svgWidth / 2 - node.x * scale;
+              const ty = svgHeight / 2 - node.y * scale;
+              svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+            }
           }}
         />
       );
@@ -306,6 +344,7 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
             }
           }
         }}
+        onNavigateToGroup={handleNavigateToGroup}
       />
     </div>
   );

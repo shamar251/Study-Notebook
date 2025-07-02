@@ -236,6 +236,8 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
       where: '#14b8a6',  // teal
       how: '#f97316',    // orange
       'where-ref': '#14b8a6', // teal (same as where)
+      why: '#6366f1',
+      when: '#ec4899',
     };
     return colorMap[type] || '#6b7280';
   };
@@ -266,6 +268,31 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
     return blocks.find(b => b.id === id);
   }
 
+  // Handle group navigation
+  const handleNavigateToGroup = (groupBlocks: Block[]) => {
+    // Open the group detail modal AND center the view on the first block
+    setGroupModal({ groupBlocks });
+
+    // Also center the view on the first block in the group
+    const firstBlock = groupBlocks[0];
+    if (firstBlock) {
+      const node = nodesRef.current.find(n => n.id === firstBlock.id);
+      if (node) {
+        setSelectedNode(node);
+        // Center the SVG view on the node
+        if (svgRef.current && node.x !== undefined && node.y !== undefined && zoomRef.current) {
+          const svg = d3.select(svgRef.current);
+          const svgWidth = svgRef.current.clientWidth;
+          const svgHeight = svgRef.current.clientHeight;
+          const scale = 1.2;
+          const tx = svgWidth / 2 - node.x * scale;
+          const ty = svgHeight / 2 - node.y * scale;
+          svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+        }
+      }
+    }
+  };
+
   // Card rendering
   const renderCard = () => {
     if (groupModal) {
@@ -276,6 +303,17 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
           onSelectBlock={b => {
             setSelectedNode(nodesRef.current.find(n => n.id === b.id) || null);
             setGroupModal(null);
+            // Center the SVG view on the selected block
+            const node = nodesRef.current.find(n => n.id === b.id);
+            if (node && svgRef.current && node.x !== undefined && node.y !== undefined && zoomRef.current) {
+              const svg = d3.select(svgRef.current);
+              const svgWidth = svgRef.current.clientWidth;
+              const svgHeight = svgRef.current.clientHeight;
+              const scale = 1.2;
+              const tx = svgWidth / 2 - node.x * scale;
+              const ty = svgHeight / 2 - node.y * scale;
+              svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+            }
           }}
         />
       );
@@ -319,6 +357,7 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
             }
           }
         }}
+        onNavigateToGroup={handleNavigateToGroup}
       />
     </div>
   );
