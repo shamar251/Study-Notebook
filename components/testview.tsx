@@ -307,6 +307,16 @@ function renderMathOrText(block: any) {
   return text;
 }
 
+// 1. Add helper function at the top (after imports)
+function arraysEqual(a: any[], b: any[]) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export default function TestView({ availableFolders, availableNotes = [], onTestComplete, defaultFolderId, defaultNoteId, autoStartIfDefault }: TestViewProps) {
   // Step 1: Setup
   const [step, setStep] = useState<"setup" | "test" | "summary">("setup");
@@ -437,11 +447,21 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
   };
 
   // Step 6: Navigation
-  const handleNext = () => setCurrentIdx(i => Math.min(i + 1, questions.length - 1));
+  const handleNext = () => {
+    const q = questions[currentIdx];
+    if (q.type === "sequence" && !answers[q.id]) {
+      setAnswers(a => ({ ...a, [q.id]: sequenceOrder }));
+    }
+    setCurrentIdx(i => Math.min(i + 1, questions.length - 1));
+  };
   const handlePrev = () => setCurrentIdx(i => Math.max(i - 1, 0));
 
   // Step 7: Submission
   const handleSubmit = async () => {
+    const q = questions[currentIdx];
+    if (q.type === "sequence" && !answers[q.id]) {
+      setAnswers(a => ({ ...a, [q.id]: sequenceOrder }));
+    }
     setEndTime(Date.now());
     setStep("summary");
     // For MVP: simple grading (compare to q.answer for all types)
@@ -450,7 +470,8 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
       let isCorrect = false;
       const userAnswer = answers[q.id] || "";
       if (q.type === "sequence") {
-        isCorrect = Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence);
+        // Ensure userAnswer is an array for sequence questions
+        isCorrect = Array.isArray(userAnswer) && arraysEqual(userAnswer, q.sequence);
       } else {
         isCorrect = typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
       }
@@ -504,6 +525,9 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
       setWasSequenceCorrect(null);
       setUserSequenceOrder([]);
       setShowUserSequence(false);
+      if (!answers[questions[currentIdx].id]) {
+        setAnswers(a => ({ ...a, [questions[currentIdx].id]: questions[currentIdx].options }));
+      }
     }
     // eslint-disable-next-line
   }, [currentIdx, step, questions]);

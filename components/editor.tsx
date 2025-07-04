@@ -50,6 +50,10 @@ export default function Editor({ note, updateNote }: EditorProps) {
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
+  // Connection highlighting state
+  const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null)
+  const [highlightedConnectedBlockIds, setHighlightedConnectedBlockIds] = useState<Set<string>>(new Set())
+
   // Use the block manager hook
   const blockManager = useBlockManager({
     blocks,
@@ -405,6 +409,55 @@ export default function Editor({ note, updateNote }: EditorProps) {
     }, 150) // Debounce scroll events
   }, [])
 
+  // Handler to delete a block and scroll to the next block after deletion
+  const handleDeleteBlockAndScroll = useCallback((blockId: string) => {
+    const index = blocks.findIndex(b => b.id === blockId);
+    blockManager.deleteBlock(blockId);
+    setTimeout(() => {
+      // Scroll to the same index (now the next block, or last if at end)
+      const newIndex = Math.min(index, blocks.length - 2); // -2 because one block is deleted
+      if (newIndex >= 0) {
+        virtuosoRef.current?.scrollToIndex({ index: newIndex, align: 'start' });
+      }
+    }, 0);
+  }, [blocks, blockManager]);
+
+  // Get directly linked blocks for a given block
+  const getDirectlyLinkedBlockIds = useCallback((blockId: string): Set<string> => {
+    const block = blocks.find(b => b.id === blockId);
+    if (!block) return new Set();
+
+    const connectedIds = new Set<string>();
+
+    // Add blocks that this block links to
+    if (block.linkedBlockIds) {
+      block.linkedBlockIds.forEach(id => connectedIds.add(id));
+    }
+
+    // Add blocks that link to this block
+    blocks.forEach(b => {
+      if (b.linkedBlockIds?.includes(blockId)) {
+        connectedIds.add(b.id);
+      }
+    });
+
+    return connectedIds;
+  }, [blocks]);
+
+  // Handle block click for connection highlighting
+  const handleBlockClick = useCallback((blockId: string) => {
+    if (highlightedBlockId === blockId) {
+      // Clicking the same block again removes highlighting
+      setHighlightedBlockId(null);
+      setHighlightedConnectedBlockIds(new Set());
+    } else {
+      // Clicking a different block highlights its connections
+      const connectedIds = getDirectlyLinkedBlockIds(blockId);
+      setHighlightedBlockId(blockId);
+      setHighlightedConnectedBlockIds(connectedIds);
+    }
+  }, [highlightedBlockId, getDirectlyLinkedBlockIds]);
+
   // Virtuoso item renderer
   const renderGroup = useCallback((index: number) => {
     const [groupId, groupBlocks] = groupedBlocks[index];
@@ -417,6 +470,11 @@ export default function Editor({ note, updateNote }: EditorProps) {
           // Add extra top margin to the very first block in the list
           const isFirstBlockOverall = index === 0 && blockIdx === 0;
           const extraClass = isFirstBlockOverall ? "mt-6" : (isFirstWhoInGroup ? "mt-8" : "");
+
+          // Determine if this block should be highlighted (click takes precedence over hover)
+          const isHighlighted = highlightedBlockId === block.id;
+          const isConnectedHighlighted = highlightedConnectedBlockIds.has(block.id);
+
           return (
             <div
               key={`${block.id}-${block.type}-${blockIdx}`}
@@ -431,7 +489,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
                   previewMode={previewMode}
                   onUpdateBlock={blockManager.updateBlock}
                   onUpdateBlockImmediate={blockManager.updateBlockImmediate}
-                  onDeleteBlock={blockManager.deleteBlock}
+                  onDeleteBlock={handleDeleteBlockAndScroll}
                   onAddWhatBlock={blockManager.addWhatBlock}
                   onToggleTruthState={blockManager.toggleTruthState}
                   onRemoveBlockImage={blockManager.removeBlockImage}
@@ -449,6 +507,9 @@ export default function Editor({ note, updateNote }: EditorProps) {
                   groupId={groupId}
                   onDoubleClick={handleBlockDoubleClick}
                   onSelectExistingWhereBlock={handleSelectExistingWhereBlock}
+                  onBlockClick={handleBlockClick}
+                  isHighlighted={isHighlighted}
+                  isConnectedHighlighted={isConnectedHighlighted}
                 />
               ) : (
                 <MemoizedBlockPreview
@@ -461,7 +522,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
         })}
       </div>
     );
-  }, [groupedBlocks, previewMode, blocks, blockManager, getExistingWhereBlocks, handlePaste, handleBlockDoubleClick, handleSelectExistingWhereBlock]);
+  }, [groupedBlocks, previewMode, blocks, blockManager, getExistingWhereBlocks, handlePaste, handleBlockDoubleClick, handleSelectExistingWhereBlock, handleDeleteBlockAndScroll, handleBlockClick, highlightedBlockId, highlightedConnectedBlockIds]);
 
   // Shared handler for adding a block after another block (with scroll)
   const handleAddBlockAfterWithScroll = useCallback((type: Block["type"], afterBlockId?: string) => {
@@ -553,6 +614,9 @@ export default function Editor({ note, updateNote }: EditorProps) {
             totalCount={groupedBlocks.length}
             itemContent={renderGroup}
             overscan={100}
+            components={{
+              Footer: () => <div style={{ height: 8 }} />
+            }}
           />
           {/* Use centralized logic for unlinked WHO blocks */}
           {unlinkedWhoBlocksCount > 0 && previewMode === "edit" && (

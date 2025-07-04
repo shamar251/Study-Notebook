@@ -7,6 +7,9 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import type { Note, Folder } from "@/components/note-app"
 import TimeSince from "./TimeSince"
 import { db } from "@/lib/db"
@@ -18,13 +21,17 @@ interface DashboardProps {
   onOpenNote: (note: Note) => void
   onStudyNote: (noteOrFolderId: Note | Note[] | string, mode: "flashcards" | "quiz") => void
   onCreateNote: () => void
+  onCreateFolder: (name: string, parentId: string | null, description?: string) => void
 }
 
-export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onCreateNote }: DashboardProps) {
+export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onCreateNote, onCreateFolder }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("study")
   const [folderTestSessions, setFolderTestSessions] = useState<{ [folderId: string]: any }>({})
   const [noteTestSessions, setNoteTestSessions] = useState<{ [noteId: string]: any }>({})
   const [folderQuizSessions, setFolderQuizSessions] = useState<{ [folderId: string]: any }>({})
+  const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false)
+  const [newFolderName, setNewFolderName] = useState("")
+  const [newFolderDescription, setNewFolderDescription] = useState("")
 
   useEffect(() => {
     async function fetchTestSessions() {
@@ -185,6 +192,16 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
     .slice(0, 6);
 
+  // Handle folder creation
+  const handleCreateFolder = () => {
+    if (newFolderName.trim()) {
+      onCreateFolder(newFolderName.trim(), null, newFolderDescription.trim() || undefined)
+      setNewFolderName("")
+      setNewFolderDescription("")
+      setShowCreateFolderDialog(false)
+    }
+  }
+
   return (
     <div className="flex-1 overflow-auto hide-scrollbar">
       <div className="w-full p-5">
@@ -193,7 +210,27 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
         </div>
 
         <div className="mb-8">
-          <h2 className="text-lg font-semibold mb-4">Recent</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold flex items-center"><Clock className="w-5 h-5 mr-2" />Recent</h2>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onCreateNote}
+                className="flex items-center gap-2"
+              >
+                <FileText className="w-5 h-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCreateFolderDialog(true)}
+                className="flex items-center gap-2"
+              >
+                <FolderIcon className="w-5 h-5" strokeWidth={1.5} />
+              </Button>
+            </div>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {recentItems.map(({ type, item }) =>
               type === "note" ? (
@@ -201,38 +238,55 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                   <CardHeader className="pb-2">
                     <div className="flex justify-between items-start">
                       <div>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <FileText className="w-4 h-4 text-black" />
-                          {item.title}
+                        <CardTitle className="text-base font-semibold flex items-center gap-2">
+                          <span className="flex-shrink-0"><FileText className="w-5 h-5 text-black" /></span>
+                          <span className="line-clamp-2 truncate break-words max-w-[180px]">{item.title}</span>
                         </CardTitle>
-                        <CardDescription>{getFolderName(item.folderId)}</CardDescription>
+                        <CardDescription className="text-sm pt-2 pl-1">{getFolderName(item.folderId)}</CardDescription>
                       </div>
-                      <Badge variant="outline" className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> <TimeSince timestamp={item.updatedAt} />
-                      </Badge>
+                      {/* <Badge variant="outline" className="flex items-center gap-1 text-xs px-2 py-1 rounded-full">
+                        <Clock className="w-5 h-5" /> <TimeSince timestamp={item.updatedAt} />
+                      </Badge> */}
                     </div>
                   </CardHeader>
                   <CardContent className="flex-1 pb-2">
                     <div className="flex flex-wrap gap-1 mb-2">
                       {item.tags && item.tags.length > 0 ? (
                         item.tags.map((tag: any) => (
-                          <Badge key={tag} variant="secondary" className="text-xs">
+                          <Badge key={tag} variant="secondary" className="text-xs px-2 py-0.5">
                             {tag}
                           </Badge>
                         ))
                       ) : (
-                        <Badge variant="secondary" className="text-xs">No tags</Badge>
+                        <Badge variant="secondary" className="text-xs px-2 py-0.5">No tags</Badge>
                       )}
                     </div>
                     <p className="text-sm text-gray-500 line-clamp-2">
-                      {item.blocks.find((b: any) => b.type === "note")?.content ||
-                        item.blocks.find((b: any) => b.type === "what")?.content ||
-                        "No content"}
+                      {(() => {
+                        if (!item.blocks || item.blocks.length === 0) return "No content";
+                        // Helper to get a numeric timestamp from various types
+                        const getTime = (val: any) => {
+                          if (!val) return 0;
+                          if (typeof val === 'number') return val;
+                          if (typeof val === 'string') return Date.parse(val);
+                          if (val instanceof Date) return val.getTime();
+                          return 0;
+                        };
+                        // Sort by lastModified or createdAt
+                        const sorted = [...item.blocks].sort((a, b) => {
+                          const aTime = getTime(a.lastModified) || getTime(a.createdAt);
+                          const bTime = getTime(b.lastModified) || getTime(b.createdAt);
+                          return bTime - aTime;
+                        });
+                        // If all timestamps are missing or equal, fallback to last block
+                        const mostRecentBlock = (sorted[0] && (getTime(sorted[0].lastModified) || getTime(sorted[0].createdAt))) ? sorted[0] : item.blocks[item.blocks.length - 1];
+                        return mostRecentBlock?.content || "No content";
+                      })()}
                     </p>
                     <div className="flex items-center gap-2 mt-2">
-                      <div className="text-xs text-blue-600 dark:text-blue-400 flex items-center">
+                      <a href="#" className="text-xs text-blue-600 dark:text-blue-400 flex items-center hover:underline">
                         <span className="font-medium mr-1">{countStudyPairs(item)}</span> study items
-                      </div>
+                      </a>
                       {item.studyStats?.quizAttempts ? (
                         <div className="text-xs text-green-600 dark:text-green-400 flex items-center">
                           <span className="font-medium mr-1">{getStudyProgress(item)}%</span> quiz score
@@ -246,15 +300,15 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
                     </div>
                   </CardContent>
                   <CardFooter className="pt-2 flex justify-between">
-                    <Button variant="outline" size="sm" onClick={() => onOpenNote(item)}>
-                      <Edit className="w-3 h-3 mr-1" /> Edit
+                    <Button variant="outline" size="sm" className="flex items-center gap-1" onClick={() => onOpenNote(item)}>
+                      <Edit className="w-5 h-5 mr-1" /> Edit
                     </Button>
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(item, "flashcards")}>
-                        <Layers className="w-4 h-4 mr-1" /> Cards
+                      <Button variant="ghost" size="sm" className="flex items-center gap-1" onClick={() => onStudyNote(item, "flashcards")}>
+                        <Layers className="w-5 h-5 mr-1" /> Cards
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => onStudyNote(item, "quiz")}>
-                        <ListChecks className="w-4 h-4 mr-1" /> Quiz
+                      <Button variant="ghost" size="sm" className="flex items-center gap-1" onClick={() => onStudyNote(item, "quiz")}>
+                        <ListChecks className="w-5 h-5 mr-1" /> Quiz
                       </Button>
                     </div>
                   </CardFooter>
@@ -308,6 +362,66 @@ export default function Dashboard({ notes, folders, onOpenNote, onStudyNote, onC
             )}
           </div>
         </div>
+
+        {/* Create Folder Dialog */}
+        <Dialog open={showCreateFolderDialog} onOpenChange={setShowCreateFolderDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FolderIcon className="w-5 h-5" />
+                Create New Folder
+              </DialogTitle>
+              <DialogDescription>
+                Create a new folder to organize your notes
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <label htmlFor="folderName" className="text-sm font-medium">
+                  Folder Name
+                </label>
+                <Input
+                  id="folderName"
+                  value={newFolderName}
+                  onChange={(e) => setNewFolderName(e.target.value)}
+                  placeholder="Enter folder name"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleCreateFolder()
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+              <div className="grid gap-2">
+                <label htmlFor="folderDescription" className="text-sm font-medium">
+                  Description (Optional)
+                </label>
+                <Textarea
+                  id="folderDescription"
+                  value={newFolderDescription}
+                  onChange={(e) => setNewFolderDescription(e.target.value)}
+                  placeholder="Enter folder description"
+                  className="min-h-[80px]"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setShowCreateFolderDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleCreateFolder}
+                disabled={!newFolderName.trim()}
+              >
+                Create Folder
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

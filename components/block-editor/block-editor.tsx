@@ -59,6 +59,9 @@ interface BlockEditorProps {
   isLastInGroup?: boolean
   onDoubleClick?: (block: Block) => void
   onSelectExistingWhereBlock?: (targetBlockId: string, referenceBlock: Block) => void
+  onBlockClick?: (blockId: string) => void
+  isHighlighted?: boolean
+  isConnectedHighlighted?: boolean
 }
 
 // Lazy loading hook for images
@@ -227,7 +230,10 @@ export const BlockEditor = React.memo(function BlockEditor({
   isFirstInGroup,
   isLastInGroup,
   onDoubleClick,
-  onSelectExistingWhereBlock
+  onSelectExistingWhereBlock,
+  onBlockClick,
+  isHighlighted = false,
+  isConnectedHighlighted = false
 }: BlockEditorProps) {
 
   // Memoize expensive calculations
@@ -352,6 +358,51 @@ export const BlockEditor = React.memo(function BlockEditor({
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
     onPaste(e, block.id);
   }, [onPaste, block.id]);
+
+  // Handle block click for connection highlighting
+  const handleBlockClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onBlockClick) {
+      onBlockClick(block.id);
+    }
+  }, [onBlockClick, block.id]);
+
+  // Handle double click for block detail card
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onDoubleClick) {
+      onDoubleClick(block);
+    }
+  }, [onDoubleClick, block]);
+
+  // Determine highlighting classes
+  const getHighlightingClasses = useCallback(() => {
+    if (isHighlighted) {
+      return "relative";
+    }
+    if (isConnectedHighlighted) {
+      return "relative";
+    }
+    return "";
+  }, [isHighlighted, isConnectedHighlighted]);
+
+  // Render connection indicator
+  const renderConnectionIndicator = useCallback(() => {
+    if (!isConnectedHighlighted) return null;
+
+    return (
+      <div className="absolute -left-1 top-1/2 transform -translate-y-1/2 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800 shadow-sm z-10" />
+    );
+  }, [isConnectedHighlighted]);
+
+  // Render selected block indicator
+  const renderSelectedIndicator = useCallback(() => {
+    if (!isHighlighted) return null;
+
+    return (
+      <div className="absolute -left-1 top-1/2 transform -translate-y-1/2 w-4 h-4 bg-yellow-400 rounded-full border-2 border-white dark:border-gray-800 shadow-sm z-10" />
+    );
+  }, [isHighlighted]);
 
   const renderBlockContent = useCallback(() => {
     switch (block.type) {
@@ -598,9 +649,12 @@ export const BlockEditor = React.memo(function BlockEditor({
 
   return (
     <div
-      className={`group relative border-l-4 ${BLOCK_TYPE_COLORS[block.type]} pl-3 ${shouldStick ? "py-0.5 border-b-0" : "py-2"} hover:bg-gray-50 dark:hover:bg-gray-800/50 ${groupData.borderRadiusClass}`}
-      onDoubleClick={() => onDoubleClick && onDoubleClick(block)}
+      className={`group relative border-l-4 ${BLOCK_TYPE_COLORS[block.type]} pl-3 ${shouldStick ? "py-0.5 border-b-0" : "py-2"} hover:bg-gray-50 dark:hover:bg-gray-800/50 ${groupData.borderRadiusClass} ${getHighlightingClasses()} cursor-pointer`}
+      onClick={handleBlockClick}
+      onDoubleClick={handleDoubleClick}
     >
+      {renderConnectionIndicator()}
+      {renderSelectedIndicator()}
       <div className="flex items-start gap-2">
         <div className="flex-none w-8 text-right text-xs text-gray-500 mt-1 font-mono">[{index + 1}]</div>
         <div className="flex-1">
@@ -632,7 +686,10 @@ export const BlockEditor = React.memo(function BlockEditor({
             )}
             {(block.type === "who" || block.type === "what" || block.type === "note" || block.type === "why") && (
               <button
-                onClick={() => handleUpdateBlockImmediate()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleUpdateBlockImmediate();
+                }}
                 title={block.math ? "Math mode enabled" : "Enable math mode"}
                 className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors
                   ${block.type === "who"
@@ -674,7 +731,10 @@ export const BlockEditor = React.memo(function BlockEditor({
             )}
             {block.type === "what" && (
               <button
-                onClick={() => handleToggleTruthState()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleToggleTruthState();
+                }}
                 title={
                   block.truthState === "true"
                     ? "True statement (click to set False)"
@@ -703,7 +763,10 @@ export const BlockEditor = React.memo(function BlockEditor({
               variant="ghost"
               size="icon"
               className="h-7 w-7 opacity-0 group-hover:opacity-100"
-              onClick={() => handleDeleteBlock()}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteBlock();
+              }}
             >
               <X className="w-4 h-4" />
             </Button>

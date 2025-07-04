@@ -357,193 +357,10 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
       }
     }
 
-    if (type === "how") {
-      // If afterBlockId is provided, use its group
-      if (effectiveAfterBlockId) {
-        const afterBlock = blocks.find(b => b.id === effectiveAfterBlockId);
-        if (!afterBlock) return;
-
-        // Optimized group finding - avoid expensive getConnectedGroup call
-        const visited = new Set<string>();
-        const groupBlocks: Block[] = [];
-
-        const traverse = (currentBlock: Block) => {
-          if (visited.has(currentBlock.id)) return;
-          visited.add(currentBlock.id);
-          groupBlocks.push(currentBlock);
-
-          // Forward connections
-          (currentBlock.linkedBlockIds || []).forEach(id => {
-            const next = blocks.find(x => x.id === id);
-            if (next) traverse(next);
-          });
-
-          // Backward connections
-          blocks.forEach(x => {
-            if (x.linkedBlockIds?.includes(currentBlock.id) && !visited.has(x.id)) {
-              traverse(x);
-            }
-          });
-        };
-
-        traverse(afterBlock);
-
-        // Find all HOW blocks in this group
-        const groupHowBlocks = groupBlocks.filter(b => b.type === "how");
-        if (groupHowBlocks.length > 0) {
-          // Insert after the last HOW block in this group
-          const lastHowBlock = groupHowBlocks[groupHowBlocks.length - 1];
-          const idx = blocks.findIndex(b => b.id === lastHowBlock.id);
-          if (idx === -1) return;
-          newBlock = {
-            id: `block-${Date.now()}`,
-            type,
-            content: "",
-            math: false,
-            createdAt: new Date(),
-            lastModified: new Date(),
-            sortOrder: blocks.length,
-          };
-          updatedBlocks = [
-            ...blocks.slice(0, idx + 1),
-            newBlock,
-            ...blocks.slice(idx + 1)
-          ];
-          // Link the new HOW block to the last HOW block in the group
-          updatedBlocks = updatedBlocks.map(b =>
-            b.id === lastHowBlock.id
-              ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
-              : b
-          );
-          setBlocks(updatedBlocks);
-          return newBlock;
-        } else {
-          // No HOW block in group, insert after afterBlockId in main array
-          const idx = blocks.findIndex(b => b.id === effectiveAfterBlockId);
-          if (idx === -1) return;
-          newBlock = {
-            id: `block-${Date.now()}`,
-            type,
-            content: "",
-            math: false,
-            createdAt: new Date(),
-            lastModified: new Date(),
-            sortOrder: blocks.length,
-          };
-          updatedBlocks = [
-            ...blocks.slice(0, idx + 1),
-            newBlock,
-            ...blocks.slice(idx + 1)
-          ];
-          // Link the new HOW block to the selected block
-          updatedBlocks = updatedBlocks.map(b =>
-            b.id === effectiveAfterBlockId
-              ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
-              : b
-          );
-          setBlocks(updatedBlocks);
-          return newBlock;
-        }
-      } else {
-        // No afterBlockId, fallback to global last HOW block
-        const howBlocks = blocks.filter(b => b.type === "how");
-        if (howBlocks.length > 0) {
-          const lastHowBlock = howBlocks[howBlocks.length - 1];
-          const idx = blocks.findIndex(b => b.id === lastHowBlock.id);
-          if (idx === -1) return;
-          newBlock = {
-            id: `block-${Date.now()}`,
-            type,
-            content: "",
-            math: false,
-            createdAt: new Date(),
-            lastModified: new Date(),
-            sortOrder: blocks.length,
-          };
-          updatedBlocks = [
-            ...blocks.slice(0, idx + 1),
-            newBlock,
-            ...blocks.slice(idx + 1)
-          ];
-          updatedBlocks = updatedBlocks.map(b =>
-            b.id === lastHowBlock.id
-              ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
-              : b
-          );
-          setBlocks(updatedBlocks);
-          return newBlock;
-        }
-        // If no HOW blocks exist, fallback to end
-      }
-    }
-
+    // Remove special HOW block logic: treat HOW like any other block
     if (effectiveAfterBlockId) {
-      const afterBlock = blocks.find(b => b.id === effectiveAfterBlockId);
-      if (!afterBlock) return;
-
-      // Optimized group finding - avoid expensive getConnectedGroup call
-      const visited = new Set<string>();
-      const groupBlocks: Block[] = [];
-
-      const traverse = (currentBlock: Block) => {
-        if (visited.has(currentBlock.id)) return;
-        visited.add(currentBlock.id);
-        groupBlocks.push(currentBlock);
-
-        // Forward connections
-        (currentBlock.linkedBlockIds || []).forEach(id => {
-          const next = blocks.find(x => x.id === id);
-          if (next) traverse(next);
-        });
-
-        // Backward connections
-        blocks.forEach(x => {
-          if (x.linkedBlockIds?.includes(currentBlock.id) && !visited.has(x.id)) {
-            traverse(x);
-          }
-        });
-      };
-
-      traverse(afterBlock);
-
-      const groupIds = groupBlocks.map(b => b.id);
-      const idxInGroup = groupIds.indexOf(effectiveAfterBlockId);
-      const idxInBlocks = blocks.findIndex(b => b.id === effectiveAfterBlockId);
-      if (idxInGroup === -1 || idxInBlocks === -1) return;
-
-      // If afterBlock is a HOW block and is part of a HOW chain, insert at end of group
-      if (afterBlock.type === "how") {
-        const isHowChain = !!afterBlock.linkedBlockIds?.some(id => {
-          const next = blocks.find(b => b.id === id);
-          return next && next.type === "how";
-        });
-        if (isHowChain) {
-          const lastBlockInGroup = groupBlocks[groupBlocks.length - 1];
-          const idxLastInBlocks = blocks.findIndex(b => b.id === lastBlockInGroup.id);
-          newBlock = {
-            id: `block-${Date.now()}`,
-            type,
-            content: "",
-            math: false,
-            createdAt: new Date(),
-            lastModified: new Date(),
-            sortOrder: blocks.length,
-          };
-          updatedBlocks = [
-            ...blocks.slice(0, idxLastInBlocks + 1),
-            newBlock,
-            ...blocks.slice(idxLastInBlocks + 1)
-          ];
-          updatedBlocks = updatedBlocks.map(b =>
-            b.id === lastBlockInGroup.id
-              ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
-              : b
-          );
-          setBlocks(updatedBlocks);
-          return newBlock;
-        }
-      }
-
+      const idx = blocks.findIndex(b => b.id === effectiveAfterBlockId);
+      if (idx === -1) return;
       newBlock = {
         id: `block-${Date.now()}`,
         type,
@@ -554,16 +371,18 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
         sortOrder: blocks.length,
       };
       updatedBlocks = [
-        ...blocks.slice(0, idxInBlocks + 1),
+        ...blocks.slice(0, idx + 1),
         newBlock,
-        ...blocks.slice(idxInBlocks + 1)
+        ...blocks.slice(idx + 1)
       ];
+      // Link the new block to the selected block
       updatedBlocks = updatedBlocks.map(b =>
         b.id === effectiveAfterBlockId
           ? { ...b, linkedBlockIds: [...(b.linkedBlockIds || []), newBlock.id] }
           : b
       );
       setBlocks(updatedBlocks);
+      return newBlock;
     } else {
       newBlock = {
         id: `block-${Date.now()}`,

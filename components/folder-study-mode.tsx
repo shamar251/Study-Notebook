@@ -3,6 +3,7 @@ import { Folder as FolderIcon, FileText, Plus, Edit, Repeat, Layers, ListChecks,
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import type { Note } from "@/components/note-app"
 import type { Folder } from '@/lib/db'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "@/components/ui/dropdown-menu"
@@ -33,7 +34,7 @@ interface FolderStudyModeProps {
   notes: Note[]
   onOpenSubfolder: (subfolderId: string) => void
   onCreateNote: () => void
-  onCreateSubfolder: () => void
+  onCreateSubfolder: (name: string, description?: string) => void
   onEditDescription?: (description: string) => void
   onEditName?: (name: string) => void
   onSelectMode: (mode: "flashcards" | "quiz" | "test", note?: Note, subfolderId?: string) => void
@@ -226,6 +227,10 @@ export default function FolderStudyMode({
   const [mostRecentTest, setMostRecentTest] = useState<FolderTestScore | null>(null)
   const [subfolderTestSessions, setSubfolderTestSessions] = useState<{ [subfolderId: string]: any }>({})
   const [expandedFolders, setExpandedFolders] = useState<{ [id: string]: boolean }>({})
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [createType, setCreateType] = useState<"note" | "folder">("note")
+  const [newItemName, setNewItemName] = useState("")
+  const [newItemDescription, setNewItemDescription] = useState("")
 
   // Update local state if folderName/folderDescription change from parent
   useEffect(() => { setNewName(folderName) }, [folderName])
@@ -338,6 +343,27 @@ export default function FolderStudyMode({
     if (onEditDescription && newDescription !== folderDescription) {
       onEditDescription(newDescription)
     }
+  }
+
+  const handleCreateItem = (type: "note" | "folder") => {
+    setCreateType(type)
+    setNewItemName("")
+    setNewItemDescription("")
+    setShowCreateDialog(true)
+  }
+
+  const handleCreateSubmit = () => {
+    if (!newItemName.trim()) return
+
+    if (createType === "note") {
+      onCreateNote()
+    } else if (createType === "folder") {
+      onCreateSubfolder(newItemName.trim(), newItemDescription.trim() || undefined)
+    }
+
+    setShowCreateDialog(false)
+    setNewItemName("")
+    setNewItemDescription("")
   }
 
   // Fetch nested folder test scores
@@ -511,7 +537,7 @@ export default function FolderStudyMode({
                 {/* Flashcards */}
                 <div className="border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 flex items-center justify-center rounded-md text-center w-32 transition-colors">
                   <Layers className="w-4 h-4 text-current mr-2" />
-                  <div className="text-base font-bold">{countStudyPairs(folderNotes)}</div>
+                  <div className="text-base font-semibold">{countStudyPairs(folderNotes)}</div>
                 </div>
                 {/* Quiz Score */}
                 <div className="border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 flex items-center justify-center rounded-md text-center w-32 transition-colors">
@@ -540,9 +566,21 @@ export default function FolderStudyMode({
               </div>
             </div>
             <div className="flex gap-2 ml-auto mr-2">
-              <Button onClick={onCreateNote}>
-                <Plus className="w-4 h-4 mr-2" /> Create
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button>
+                    <Plus className="w-4 h-4 mr-2" /> Create
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuItem onClick={() => handleCreateItem("note")}>
+                    <FileText className="w-4 h-4 mr-2" /> New Note
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleCreateItem("folder")}>
+                    <FolderIcon className="w-4 h-4 mr-2" /> New Folder
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
@@ -623,6 +661,62 @@ export default function FolderStudyMode({
           })()}
         </div>
       </div>
+
+      {/* Create Item Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              Create New {createType === "note" ? "Note" : "Folder"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <label htmlFor="itemName" className="text-sm font-medium">
+                {createType === "note" ? "Note" : "Folder"} Name
+              </label>
+              <Input
+                id="itemName"
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                placeholder={`Enter ${createType === "note" ? "note" : "folder"} name`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    handleCreateSubmit()
+                  }
+                }}
+              />
+            </div>
+            <div className="grid gap-2">
+              <label htmlFor="itemDescription" className="text-sm font-medium">
+                Description (Optional)
+              </label>
+              <Textarea
+                id="itemDescription"
+                value={newItemDescription}
+                onChange={(e) => setNewItemDescription(e.target.value)}
+                placeholder={`Enter ${createType === "note" ? "note" : "folder"} description`}
+                className="min-h-[80px]"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreateSubmit}
+              disabled={!newItemName.trim()}
+            >
+              Create {createType === "note" ? "Note" : "Folder"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Nested Test Scores Dialog */}
       <Dialog open={showNestedTestScores} onOpenChange={setShowNestedTestScores}>

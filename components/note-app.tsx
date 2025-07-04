@@ -832,6 +832,7 @@ export default function NoteApp() {
               onOpenNote={openNote}
               onStudyNote={studyNote}
               onCreateNote={createNewNote}
+              onCreateFolder={createFolderHandler}
             />
           )}
 
@@ -845,7 +846,7 @@ export default function NoteApp() {
                 setShowStudyModeSelector(false)
                 setShowDashboard(false)
               }}
-              onCreateSubfolder={() => createFolderHandler("New Subfolder", activeFolder)}
+              onCreateSubfolder={(name, description) => createFolderHandler(name, activeFolder, description || "")}
               folderNotes={folderNotes}
               subfolders={folders.filter(f => f.parentId === activeFolder).map(f => ({ id: f.id, name: f.name, description: f.description }))}
               folders={folders}
