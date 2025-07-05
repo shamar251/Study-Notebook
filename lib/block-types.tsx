@@ -1,8 +1,8 @@
 import React from "react"
-import { FileText, ImageIcon, Video, Code, MapPin, ArrowRight, HelpCircle, Clock } from "lucide-react"
+import { FileText, ImageIcon, Video, Code, MapPin, ArrowRight, HelpCircle, Clock, CheckSquare } from "lucide-react"
 import type { Block } from "@/lib/db"
 
-export const BLOCK_TYPES = ["who", "what", "note", "image", "video", "code", "where", "how", "why", "when"] as const
+export const BLOCK_TYPES = ["who", "what", "note", "image", "video", "code", "where", "how", "why", "when", "check"] as const
 export type BlockType = (typeof BLOCK_TYPES)[number]
 
 export const BLOCK_TYPE_COLORS: Record<Block["type"], string> = {
@@ -16,6 +16,7 @@ export const BLOCK_TYPE_COLORS: Record<Block["type"], string> = {
   how: "border-orange-500 bg-orange-50 dark:bg-orange-900/10",
   why: "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/10",
   when: "border-pink-500 bg-pink-50 dark:bg-pink-900/10",
+  check: "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10",
 }
 
 export const BLOCK_TYPE_LABELS: Record<Block["type"], string> = {
@@ -29,6 +30,7 @@ export const BLOCK_TYPE_LABELS: Record<Block["type"], string> = {
   how: "HOW",
   why: "WHY",
   when: "WHEN",
+  check: "CHECK",
 }
 
 export const BLOCK_TYPE_ICONS: Record<Block["type"], React.ReactNode> = {
@@ -42,6 +44,7 @@ export const BLOCK_TYPE_ICONS: Record<Block["type"], React.ReactNode> = {
   how: <ArrowRight className="w-4 h-4" />,
   why: <HelpCircle className="w-4 h-4" />,
   when: <Clock className="w-4 h-4" />,
+  check: <CheckSquare className="w-4 h-4" />,
 }
 
 export const BLOCK_TYPE_PLACEHOLDERS: Record<Block["type"], string> = {
@@ -55,6 +58,7 @@ export const BLOCK_TYPE_PLACEHOLDERS: Record<Block["type"], string> = {
   how: "Enter a step or process...",
   why: "Enter a reason, cause, or explanation...",
   when: "Enter a time, date, or temporal reference...",
+  check: "Enter a task or todo item...",
 }
 
 export const BLOCK_TYPE_BADGE_CLASSES: Record<Block["type"], string> = {
@@ -68,4 +72,5 @@ export const BLOCK_TYPE_BADGE_CLASSES: Record<Block["type"], string> = {
   how: "bg-orange-100 dark:bg-orange-900/30",
   why: "bg-indigo-100 dark:bg-indigo-900/30",
   when: "bg-pink-100 dark:bg-pink-900/30",
+  check: "bg-emerald-100 dark:bg-emerald-900/30",
 } 

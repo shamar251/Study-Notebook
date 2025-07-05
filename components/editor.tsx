@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
-import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus, Link as LinkIcon, MapPin, ArrowRight, HelpCircle, Clock } from "lucide-react"
+import { X, Save, Tag, AlertCircle, ImageIcon, Video, Code, FileText, FunctionSquare, Plus, Link as LinkIcon, MapPin, ArrowRight, HelpCircle, Clock, CheckSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -492,6 +492,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
                   onDeleteBlock={handleDeleteBlockAndScroll}
                   onAddWhatBlock={blockManager.addWhatBlock}
                   onToggleTruthState={blockManager.toggleTruthState}
+                  onToggleCheckState={blockManager.toggleCheckState}
                   onRemoveBlockImage={blockManager.removeBlockImage}
                   onUpdateBlockLanguage={blockManager.updateBlockLanguage}
                   onPaste={handlePaste}
@@ -638,12 +639,11 @@ export default function Editor({ note, updateNote }: EditorProps) {
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("when")}> <Clock className="w-4 h-4 mr-2 text-pink-500" /> When Block </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("how")}> <ArrowRight className="w-4 h-4 mr-2 text-orange-500" /> HOW Block </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("why")}> <HelpCircle className="w-4 h-4 mr-2 text-indigo-500" /> WHY Block </Button>
-
-
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("note")}> <FileText className="w-4 h-4 mr-2 text-purple-500" /> NOTE Block </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("image")}> <ImageIcon className="w-4 h-4 mr-2 text-amber-500" /> Image </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("video")}> <Video className="w-4 h-4 mr-2 text-red-500" /> Video </Button>
             <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("code")}> <Code className="w-4 h-4 mr-2 text-gray-500" /> Code </Button>
+            <Button size="sm" variant="outline" onClick={() => handleAddBlockAfter("check")}> <CheckSquare className="w-4 h-4 mr-2 text-emerald-500" /> Check Block </Button>
           </div>
         )}
       </div>

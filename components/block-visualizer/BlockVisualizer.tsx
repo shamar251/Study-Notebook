@@ -4,6 +4,7 @@ import { getConnectedGroup } from "@/hooks/use-block-connections"
 import { BlockNavigationCard } from './BlockNavigationCard';
 import { GroupDetailModal } from './GroupDetailModal';
 import { BLOCK_TYPE_LABELS, BLOCK_TYPE_COLORS } from "@/lib/block-types";
+import { CheckSquare, Square } from "lucide-react";
 
 interface BlockVisualizerProps {
   blocks: Block[]
@@ -68,14 +69,23 @@ export const BlockVisualizer: React.FC<BlockVisualizerProps> = ({ blocks }) => {
               {group.map(block => (
                 <li
                   key={block.id}
-                  className="text-sm flex items-center"
+                  className={`text-sm flex items-center ${block.type === 'check' && block.isChecked ? 'opacity-60' : ''}`}
                   ref={el => { blockRefs.current[block.id] = el; }}
                 >
+                  {block.type === 'check' ? (
+                    <span className="mr-2">
+                      {block.isChecked ? (
+                        <CheckSquare className="w-4 h-4 text-emerald-600" />
+                      ) : (
+                        <Square className="w-4 h-4 text-gray-400" />
+                      )}
+                    </span>
+                  ) : null}
                   <span className={`font-mono px-2 py-1 rounded mr-2 ${BLOCK_TYPE_COLORS[block.type]}`}>
                     {BLOCK_TYPE_LABELS[block.type]}
                   </span>
                   <span className="text-gray-500 mr-2">{block.id}</span>
-                  <span className="text-xs text-gray-700 italic mr-2">
+                  <span className={`text-xs text-gray-700 italic mr-2 ${block.type === 'check' && block.isChecked ? 'line-through' : ''}`}>
                     {block.content ? block.content.slice(0, 30) + (block.content.length > 30 ? "..." : "") : "Empty block"}
                   </span>
                   {block.type === 'when' && block.linkedBlockIds && block.linkedBlockIds.length > 0 && (

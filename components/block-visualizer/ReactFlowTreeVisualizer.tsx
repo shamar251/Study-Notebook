@@ -31,6 +31,7 @@ const NODE_COLORS: Record<Block['type'], string> = {
   'where-ref': '#14b8a6',
   why: '#6366f1',
   when: '#ec4899',
+  check: '#059669',
 };
 
 interface ReactFlowTreeVisualizerProps {
@@ -50,24 +51,35 @@ function blocksToFlow(blocks: Block[]): { nodes: Node[]; edges: Edge[] } {
     if (visited.has(block.id)) return;
     visited.add(block.id);
     const nodeId = block.id;
+    let label = block.content ? block.content.slice(0, 24) : 'Empty';
+    let nodeStyle = {
+      background: NODE_COLORS[block.type],
+      color: '#fff',
+      borderRadius: 12,
+      fontWeight: 'bold',
+      fontSize: 16,
+      minWidth: 160,
+      minHeight: 60,
+      boxShadow: '0 2px 8px #0002',
+      border: '2px solid #fff',
+    };
+    if (block.type === 'check') {
+      label = (block.isChecked ? '✓ ' : '☐ ') + label;
+      if (block.isChecked) {
+        nodeStyle = {
+          ...nodeStyle,
+          color: '#d1d5db',
+        };
+      }
+    }
     nodes.push({
       id: nodeId,
       data: {
-        label: block.content ? block.content.slice(0, 24) : 'Empty',
+        label,
         type: block.type,
       },
       position: { x: depth * 250, y: y * 100 + siblingIdx * 10 },
-      style: {
-        background: NODE_COLORS[block.type],
-        color: '#fff',
-        borderRadius: 12,
-        fontWeight: 'bold',
-        fontSize: 16,
-        minWidth: 160,
-        minHeight: 60,
-        boxShadow: '0 2px 8px #0002',
-        border: '2px solid #fff',
-      },
+      style: nodeStyle,
       sourcePosition: Position.Right,
       targetPosition: Position.Left,
       type: 'default',

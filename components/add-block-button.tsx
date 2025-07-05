@@ -7,14 +7,15 @@ import {
   ImageIcon,
   Video,
   MapPin,
-  ArrowRight
+  ArrowRight,
+  CheckSquare
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 interface AddBlockButtonProps {
   onAddBlock: (
-    type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how"
+    type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how" | "check"
   ) => void
   className?: string
 }
@@ -66,6 +67,10 @@ export default function AddBlockButton({
         <DropdownMenuItem onClick={() => onAddBlock("where")}>
           <MapPin className="w-4 h-4 mr-2 text-teal-500" />
           <span>Where Block</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAddBlock("check")}>
+          <CheckSquare className="w-4 h-4 mr-2 text-emerald-500" />
+          <span>Check Block</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

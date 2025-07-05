@@ -36,6 +36,7 @@ const NODE_COLORS: Record<Block['type'], string> = {
   'where-ref': '#14b8a6',
   why: '#6366f1',
   when: '#ec4899',
+  check: '#059669',
 };
 
 function previewText(content: string) {
@@ -167,7 +168,14 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
     // Dynamic node rendering (rounded rects)
     node.each(function (d) {
       const g = d3.select(this);
-      const text = previewText(d.content);
+      let text = previewText(d.content);
+      if (d.type === 'check') {
+        const block = blocks.find(b => b.id === d.id);
+        if (block) {
+          const isChecked = block.isChecked;
+          text = (isChecked ? '✓ ' : '☐ ') + text;
+        }
+      }
       const tempText = container.append('text').text(text).attr('font-size', 12).attr('font-weight', 'bold').attr('visibility', 'hidden');
       const textWidth = tempText.node()?.getBBox().width || 40;
       tempText.remove();
@@ -189,7 +197,7 @@ export const ClusteredForceGraph: React.FC<ClusteredForceGraphProps> = ({ blocks
         .attr('dy', '0.35em')
         .attr('font-size', 12)
         .attr('font-weight', 'bold')
-        .attr('fill', '#fff');
+        .attr('fill', d.type === 'check' && blocks.find(b => b.id === d.id)?.isChecked ? '#d1d5db' : '#fff');
     });
 
     node.append('title')

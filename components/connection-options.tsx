@@ -19,7 +19,8 @@ import {
   User,
   HelpCircle,
   ArrowRight,
-  Clock
+  Clock,
+  CheckSquare
 } from "lucide-react"
 import type { Block } from "@/lib/db"
 import { BLOCK_TYPE_ICONS, BLOCK_TYPE_LABELS, BLOCK_TYPE_COLORS } from "@/lib/block-types"
@@ -91,6 +92,7 @@ export function ConnectionOptions({
     { type: "note", label: "Note Block", icon: <FileText className="w-4 h-4" />, color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-200" },
     { type: "where", label: "Where Block", icon: <MapPin className="w-4 h-4" />, color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-200" },
     { type: "when", label: "When Block", icon: <Clock className="w-4 h-4" />, color: "bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-200" },
+    { type: "check", label: "Check Block", icon: <CheckSquare className="w-4 h-4" />, color: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200" },
     { type: "image", label: "Image Block", icon: <ImageIcon className="w-4 h-4" />, color: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200" },
     { type: "video", label: "Video Block", icon: <Video className="w-4 h-4" />, color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200" },
     { type: "code", label: "Code Block", icon: <Code className="w-4 h-4" />, color: "bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200" },

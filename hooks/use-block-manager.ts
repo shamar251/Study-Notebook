@@ -216,6 +216,21 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
     setBlocks(updatedBlocks)
   }, [blocks, setBlocks])
 
+  // Toggle check state for CHECK blocks
+  const toggleCheckState = useCallback((blockId: string) => {
+    const updatedBlocks = blocks.map((b: Block) => {
+      if (b.id !== blockId) return b
+      return { ...b, isChecked: !b.isChecked }
+    })
+    setBlocks(updatedBlocks)
+    updateNote({
+      ...note,
+      title,
+      blocks: updatedBlocks,
+      tags,
+    })
+  }, [blocks, setBlocks, updateNote, note, title, tags])
+
   // Remove image from block
   const removeBlockImage = useCallback((blockId: string) => {
     setBlocks(blocks.map(b => b.id === blockId ? { ...b, image: undefined } : b))
@@ -406,6 +421,7 @@ export function useBlockManager({ blocks, setBlocks, updateNote, note, title, ta
     addWhatBlock,
     linkWhatBlocks,
     toggleTruthState,
+    toggleCheckState,
     removeBlockImage,
     updateBlockLanguage,
     isWhoBlockConnected,

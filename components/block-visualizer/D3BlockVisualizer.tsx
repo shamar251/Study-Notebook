@@ -6,6 +6,7 @@ import { BLOCK_TYPE_COLORS } from '@/lib/block-types';
 import { BlockDetailCard } from './BlockDetailCard';
 import { GroupDetailModal } from './GroupDetailModal';
 import { BlockNavigationCard } from './BlockNavigationCard';
+import { CheckSquare, Square } from "lucide-react";
 
 interface D3BlockVisualizerProps {
   blocks: Block[];
@@ -140,7 +141,15 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
     // For each node, render a rounded rect sized to the text
     node.each(function (d) {
       const g = d3.select(this);
-      const text = previewText(d.content);
+      let text = previewText(d.content);
+      // For check blocks, prepend a checkmark and style if checked
+      if (d.type === 'check') {
+        const block = blocks.find(b => b.id === d.id);
+        if (block) {
+          const isChecked = block.isChecked;
+          text = (isChecked ? '✓ ' : '☐ ') + text;
+        }
+      }
       // Use a temporary SVG text element to measure width
       const tempText = container.append('text').text(text).attr('font-size', 12).attr('font-weight', 'bold').attr('visibility', 'hidden');
       const textWidth = tempText.node()?.getBBox().width || 40;
@@ -166,7 +175,8 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
         .attr('dy', '0.35em')
         .attr('font-size', 12)
         .attr('font-weight', 'bold')
-        .attr('fill', '#fff');
+        .attr('fill', d.type === 'check' && blocks.find(b => b.id === d.id)?.isChecked ? '#d1d5db' : '#fff')
+        .attr('text-decoration', d.type === 'check' && blocks.find(b => b.id === d.id)?.isChecked ? 'line-through' : null);
     });
 
     // Add tooltips
@@ -238,6 +248,7 @@ export const D3BlockVisualizer: React.FC<D3BlockVisualizerProps> = ({
       'where-ref': '#14b8a6', // teal (same as where)
       why: '#6366f1',
       when: '#ec4899',
+      check: '#059669', // green for check
     };
     return colorMap[type] || '#6b7280';
   };

@@ -19,6 +19,7 @@ import {
 import { WhereBlockEditor } from "./blocks/where-block-editor"
 import { WhyBlockEditor } from "./blocks/why-block-editor"
 import { WhenBlockEditor } from "./blocks/when-block-editor"
+import { CheckBlockEditor } from "./blocks/check-block-editor"
 import { BlockConnectionManager } from "@/lib/block-connections"
 import { BlockConnectionManager as BlockConnectionManagerUI } from "@/components/block-connection-manager"
 import { ConnectionOptions } from "@/components/connection-options"
@@ -39,6 +40,7 @@ interface BlockEditorProps {
   onDeleteBlock: (id: string) => void
   onAddWhatBlock: (whoBlockId: string) => void
   onToggleTruthState: (blockId: string) => void
+  onToggleCheckState: (blockId: string) => void
   onRemoveBlockImage: (blockId: string) => void
   onUpdateBlockLanguage: (blockId: string, language: string) => void
   onPaste: (
@@ -214,6 +216,7 @@ export const BlockEditor = React.memo(function BlockEditor({
   onDeleteBlock,
   onAddWhatBlock,
   onToggleTruthState,
+  onToggleCheckState,
   onRemoveBlockImage,
   onUpdateBlockLanguage,
   onPaste,
@@ -642,6 +645,20 @@ export const BlockEditor = React.memo(function BlockEditor({
           />
         )
       }
+      case "check": {
+        return (
+          <CheckBlockEditor
+            block={block}
+            onUpdateBlock={handleUpdateBlock}
+            onUpdateBlockImmediate={onUpdateBlockImmediate}
+            onRemoveBlockImage={onRemoveBlockImage}
+            onUpdateBlockLanguage={onUpdateBlockLanguage}
+            onPaste={onPaste}
+            onToggleTruthState={onToggleTruthState}
+            onToggleCheckState={onToggleCheckState}
+          />
+        )
+      }
       default:
         return null
     }
@@ -684,7 +701,7 @@ export const BlockEditor = React.memo(function BlockEditor({
                 <span>{BLOCK_TYPE_LABELS[block.type]}</span>
               </Badge>
             )}
-            {(block.type === "who" || block.type === "what" || block.type === "note" || block.type === "why") && (
+            {(block.type === "who" || block.type === "what" || block.type === "note" || block.type === "why" || block.type === "check") && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -708,7 +725,11 @@ export const BlockEditor = React.memo(function BlockEditor({
                           ? block.math
                             ? "bg-indigo-100 border-indigo-500 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-200"
                             : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
-                          : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                          : block.type === "check"
+                            ? block.math
+                              ? "bg-emerald-100 border-emerald-500 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
+                              : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
+                            : "bg-gray-100 border-gray-300 text-gray-700 dark:bg-gray-700 dark:text-gray-200"
                   }`}
                 style={{ verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center' }}
               >

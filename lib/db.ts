@@ -22,7 +22,7 @@ export interface Note {
 export interface Block {
   id: string;
   folderId?: number;
-  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how" | "where-ref" | "why" | "when";
+  type: "who" | "what" | "note" | "image" | "video" | "code" | "where" | "how" | "where-ref" | "why" | "when" | "check";
   content?: string;
   whereBlockId?: string;
   data?: any;
@@ -38,6 +38,7 @@ export interface Block {
   sequenceMode?: "enabled" | "disabled" | "auto";
   sequenceStart?: boolean;
   migratedToHow?: boolean;
+  isChecked?: boolean;
   location?: {
     type: "text" | "coords"
     address?: string
