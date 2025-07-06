@@ -9,6 +9,8 @@ files:
     to: out
   - from: electron
     to: electron
+  - from: scripts
+    to: scripts
   - package.json
 mac:
   category: public.app-category.education
@@ -24,3 +26,5 @@ linux:
     - AppImage
     - deb
   category: Education
+asarUnpack:
+  - scripts/**
