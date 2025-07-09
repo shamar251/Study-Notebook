@@ -1,6 +1,7 @@
 @import 'tailwindcss/base';
 @import 'tailwindcss/components';
 @import 'tailwindcss/utilities';
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 @layer base {
   :root {
@@ -82,6 +83,7 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
   }
 
   /* Performance optimizations for smooth scrolling */
@@ -131,4 +133,113 @@
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
   /* Chrome, Safari, Opera */
+}
+
+/* Modern, minimal scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  /* Tailwind gray-300 */
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+  /* Tailwind gray-400 */
+}
+
+/* For dark mode */
+body.dark ::-webkit-scrollbar-thumb {
+  background: #27272a;
+  /* Tailwind zinc-800 */
+}
+
+body.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+  /* Tailwind zinc-600 */
+}
+
+.modern-sidebar {
+  font-size: 1.05rem;
+  line-height: 1.7;
+  background: #f8fafc;
+  /* Tailwind slate-50 */
+  border-right: 1px solid #e5e7eb;
+  /* Tailwind gray-200 */
+  box-shadow: 2px 0 8px 0 rgba(0, 0, 0, 0.03);
+  color: #18181b;
+  /* Tailwind zinc-900 */
+}
+
+body.dark .modern-sidebar {
+  background: #18181b;
+  /* Tailwind zinc-900 */
+  color: #f4f4f5;
+  /* Tailwind zinc-100 */
+  border-right: 1px solid #27272a;
+  /* Tailwind zinc-800 */
+}
+
+.modern-sidebar .flex.items-center.gap-2.px-2.py-1.rounded {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 1.05rem;
+  transition: background 0.15s, color 0.15s;
+}
+
+.modern-sidebar .flex.items-center.gap-2.px-2.py-1.rounded:hover {
+  background: #e0e7ef;
+  color: #0f172a;
+}
+
+body.dark .modern-sidebar .flex.items-center.gap-2.px-2.py-1.rounded:hover {
+  background: #27272a;
+  color: #f4f4f5;
+}
+
+.modern-sidebar .bg-accent\/30 {
+  background: #e0e7ef !important;
+  color: #0f172a !important;
+}
+
+body.dark .modern-sidebar .bg-accent\/30 {
+  background: #27272a !important;
+  color: #f4f4f5 !important;
+}
+
+.modern-sidebar .truncate {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.modern-sidebar .h-4.w-4.text-muted-foreground {
+  color: #64748b;
+}
+
+body.dark .modern-sidebar .h-4.w-4.text-muted-foreground {
+  color: #a1a1aa;
+}
+
+.modern-sidebar .rounded-md {
+  border-radius: 8px !important;
+}
+
+.modern-sidebar .border-b {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+body.dark .modern-sidebar .border-b {
+  border-bottom: 1px solid #27272a;
+}
+
+.modern-sidebar .w-1.h-full.bg-accent {
+  background: #cbd5e1;
+}
+
+body.dark .modern-sidebar .w-1.h-full.bg-accent {
+  background: #27272a;
 }

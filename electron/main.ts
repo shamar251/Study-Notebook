@@ -26,6 +26,10 @@ function createWindow() {
     icon: path.join(__dirname, "../assets/Sophia.png"),
   })
 
+  // Hide the menu bar
+  mainWindow.setMenuBarVisibility(false);
+  mainWindow.setAutoHideMenuBar(true);
+
   // Load the app
   if (isDev) {
     // In development, load from the local server

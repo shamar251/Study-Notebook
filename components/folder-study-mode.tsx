@@ -346,20 +346,23 @@ export default function FolderStudyMode({
   }
 
   const handleCreateItem = (type: "note" | "folder") => {
-    setCreateType(type)
-    setNewItemName("")
-    setNewItemDescription("")
-    setShowCreateDialog(true)
+    if (type === "note") {
+      // For notes, directly create without showing dialog
+      onCreateNote()
+    } else {
+      // For folders, show dialog to prompt for name and description
+      setCreateType(type)
+      setNewItemName("")
+      setNewItemDescription("")
+      setShowCreateDialog(true)
+    }
   }
 
   const handleCreateSubmit = () => {
     if (!newItemName.trim()) return
 
-    if (createType === "note") {
-      onCreateNote()
-    } else if (createType === "folder") {
-      onCreateSubfolder(newItemName.trim(), newItemDescription.trim() || undefined)
-    }
+    // Only folders go through this dialog now
+    onCreateSubfolder(newItemName.trim(), newItemDescription.trim() || undefined)
 
     setShowCreateDialog(false)
     setNewItemName("")
@@ -668,19 +671,19 @@ export default function FolderStudyMode({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Plus className="w-5 h-5" />
-              Create New {createType === "note" ? "Note" : "Folder"}
+              Create New Folder
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <label htmlFor="itemName" className="text-sm font-medium">
-                {createType === "note" ? "Note" : "Folder"} Name
+                Folder Name
               </label>
               <Input
                 id="itemName"
                 value={newItemName}
                 onChange={(e) => setNewItemName(e.target.value)}
-                placeholder={`Enter ${createType === "note" ? "note" : "folder"} name`}
+                placeholder="Enter folder name"
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     handleCreateSubmit()
@@ -696,7 +699,7 @@ export default function FolderStudyMode({
                 id="itemDescription"
                 value={newItemDescription}
                 onChange={(e) => setNewItemDescription(e.target.value)}
-                placeholder={`Enter ${createType === "note" ? "note" : "folder"} description`}
+                placeholder="Enter folder description"
                 className="min-h-[80px]"
               />
             </div>
@@ -712,7 +715,7 @@ export default function FolderStudyMode({
               onClick={handleCreateSubmit}
               disabled={!newItemName.trim()}
             >
-              Create {createType === "note" ? "Note" : "Folder"}
+              Create Folder
             </Button>
           </DialogFooter>
         </DialogContent>

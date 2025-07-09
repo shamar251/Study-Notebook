@@ -7,7 +7,6 @@ import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, up
 import Sidebar from "@/components/sidebar"
 import Editor from "@/components/editor"
 import StudyModeSelector from "@/components/study-mode-selector"
-import Dashboard from "@/components/dashboard"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -28,6 +27,7 @@ import { ClusteredForceGraph, D3BlockVisualizer, ReactFlowTreeVisualizer } from 
 import { Select } from "./ui/select"
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
+import NoteDashboard from "@/components/note-dashboard";
 
 export type Note = DBNote
 
@@ -42,14 +42,14 @@ export default function NoteApp() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | null>(null);
   const [showStudyModeSelector, setShowStudyModeSelector] = useState(false);
-  const [showDashboard, setShowDashboard] = useState(true);
-  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
-  const [isElectron, setIsElectron] = useState(false);
   const [folderNotes, setFolderNotes] = useState<Note[]>([]);
   const { theme, setTheme } = useTheme();
   const [visualizationMode, setVisualizationMode] = useState<'clustered' | 'classic' | 'tree' | 'reactflow'>('clustered');
   const [testTarget, setTestTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
   const [quizTarget, setQuizTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
+  const [noteTestSession, setNoteTestSession] = useState<any>(null);
+  const [isElectron, setIsElectron] = useState(false);
+  const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
 
   useEffect(() => {
     // Initialize database with default data if empty
@@ -62,11 +62,29 @@ export default function NoteApp() {
 
       setFolders(allFolders);
       setNotes(allNotes);
+
+      // Try to restore last open note
+      const lastOpenNoteId = typeof window !== 'undefined' ? localStorage.getItem('lastOpenNoteId') : null;
+      if (lastOpenNoteId && allNotes.length > 0) {
+        const found = allNotes.find(n => n.id === lastOpenNoteId);
+        if (found) {
+          setActiveNote(found);
+          setView('editor');
+          setShowStudyModeSelector(false);
+        } else {
+          setActiveNote(allNotes[0]);
+          setView('editor');
+          setShowStudyModeSelector(false);
+        }
+      } else if (allNotes.length > 0) {
+        setActiveNote(allNotes[0]);
+        setView('editor');
+        setShowStudyModeSelector(false);
+      }
     };
 
     initDb();
 
-    // Check if we're running in Electron
     setIsElectron(typeof window !== "undefined" && "electronAPI" in window);
   }, []);
 
@@ -75,12 +93,11 @@ export default function NoteApp() {
       notes.length > 0 &&
       !activeNote &&
       !showStudyModeSelector &&
-      !showDashboard &&
       !view // Only set activeNote if not in a study mode
     ) {
       setActiveNote(notes[0]);
     }
-  }, [notes, activeNote, showStudyModeSelector, showDashboard, view]);
+  }, [notes, activeNote, showStudyModeSelector, view]);
 
   useEffect(() => {
     // Create a flag to prevent state updates if the component unmounts
@@ -162,7 +179,6 @@ export default function NoteApp() {
     setActiveNote(newNote);
     setView("editor");
     setShowStudyModeSelector(false);
-    setShowDashboard(false);
   };
 
   const updateNoteHandler = async (updatedNote: Note) => {
@@ -187,7 +203,6 @@ export default function NoteApp() {
         setActiveNote(null);
         setView(null);
         setShowStudyModeSelector(false);
-        setShowDashboard(true);
       }
       await moveToTrash(fullNoteId, 'note');
       await reloadNotes();
@@ -325,7 +340,6 @@ export default function NoteApp() {
     setActiveNote(null);
     setShowStudyModeSelector(true);
     setView(null);
-    setShowDashboard(false);
 
     // Immediately fetch and set folder notes
     const notesInFolder = await getFolderNotes(folderId);
@@ -401,17 +415,18 @@ export default function NoteApp() {
   const goToDashboard = () => {
     setActiveNote(null)
     setShowStudyModeSelector(false)
-    setShowDashboard(true)
   }
 
   const openNote = (note: Note) => {
     setActiveNote(note)
     setView("editor")
     setShowStudyModeSelector(false)
-    setShowDashboard(false)
     // If currently in test view, update testTarget to the new note
     if (view === "test") {
       setTestTarget({ type: 'note', note });
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('lastOpenNoteId', note.id);
     }
   }
 
@@ -420,7 +435,7 @@ export default function NoteApp() {
     if (activeFolder) {
       setShowStudyModeSelector(true)
     } else {
-      setShowDashboard(true)
+      setShowStudyModeSelector(false)
     }
   }
 
@@ -431,19 +446,16 @@ export default function NoteApp() {
       setActiveNote(null);
       setShowStudyModeSelector(true);
       setView(null);
-      setShowDashboard(false);
     } else if (Array.isArray(noteOrFolderId)) {
       setActiveNote(null);
       setView(mode);
       setShowStudyModeSelector(false);
-      setShowDashboard(false);
       setFolderNotes(noteOrFolderId); // Show all notes in the folder
     } else {
       setActiveNote(noteOrFolderId);
       setActiveFolder(null);
       setView(mode);
       setShowStudyModeSelector(false);
-      setShowDashboard(false);
     }
   };
 
@@ -703,7 +715,6 @@ export default function NoteApp() {
       setActiveFolder(null);
       setView(null);
       setShowStudyModeSelector(false);
-      setShowDashboard(true);
 
       toast({
         title: "Database reset",
@@ -791,6 +802,19 @@ export default function NoteApp() {
     }
   };
 
+  useEffect(() => {
+    // Fetch latest test session for the active note
+    const fetchTestSession = async () => {
+      if (activeNote) {
+        const sessions = await db.testSessions.where("noteId").equals(activeNote.id).reverse().toArray();
+        setNoteTestSession(sessions.length > 0 ? sessions[0] : null);
+      } else {
+        setNoteTestSession(null);
+      }
+    };
+    fetchTestSession();
+  }, [activeNote]);
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex h-screen overflow-hidden">
@@ -816,7 +840,7 @@ export default function NoteApp() {
           moveItem={moveItem}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
-          showDashboard={showDashboard}
+          showDashboard={false}
           darkMode={darkMode}
           onToggleDarkMode={onToggleDarkMode}
           onImport={openFromFile}
@@ -825,50 +849,7 @@ export default function NoteApp() {
           permanentDeleteItem={handlePermanentDelete}
         />
         <main className="flex-1 flex flex-col overflow-hidden">
-          {showDashboard && (
-            <Dashboard
-              notes={notes}
-              folders={folders}
-              onOpenNote={openNote}
-              onStudyNote={studyNote}
-              onCreateNote={createNewNote}
-              onCreateFolder={createFolderHandler}
-            />
-          )}
-
-          {showStudyModeSelector && activeFolder && !activeNote && (
-            <FolderStudyMode
-              folderName={folders.find((f) => f.id === activeFolder)?.name || "Study"}
-              folderDescription={folders.find((f) => f.id === activeFolder)?.description}
-              onSelectMode={selectStudyMode}
-              onCreateNote={() => {
-                createNewNote()
-                setShowStudyModeSelector(false)
-                setShowDashboard(false)
-              }}
-              onCreateSubfolder={(name, description) => createFolderHandler(name, activeFolder, description || "")}
-              folderNotes={folderNotes}
-              subfolders={folders.filter(f => f.parentId === activeFolder).map(f => ({ id: f.id, name: f.name, description: f.description }))}
-              folders={folders}
-              notes={notes}
-              onOpenSubfolder={(subfolderId) => {
-                setActiveFolder(subfolderId);
-                setActiveNote(null);
-                setShowStudyModeSelector(true);
-                setView(null);
-                setShowDashboard(false);
-              }}
-              onEditDescription={(description) => {
-                if (activeFolder) {
-                  updateFolderDescriptionHandler(activeFolder, description)
-                }
-              }}
-              onEditName={handleEditFolderName}
-              onNoteClick={openNote}
-            />
-          )}
-
-          {activeNote && !showStudyModeSelector && !showDashboard && (
+          {activeNote && !showStudyModeSelector && (
             <div className="flex-1 flex flex-col overflow-hidden">
               <Tabs
                 value={view || "editor"}
@@ -877,6 +858,7 @@ export default function NoteApp() {
               >
                 <div className="flex items-center justify-between px-4 py-2 border-b">
                   <TabsList>
+                    <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
                     <TabsTrigger value="view">View Mode</TabsTrigger>
                     <TabsTrigger value="editor">Editor</TabsTrigger>
                     <TabsTrigger value="flashcards">Flashcards</TabsTrigger>
@@ -909,6 +891,14 @@ export default function NoteApp() {
                     </DropdownMenu>
                   </div>
                 </div>
+
+                <TabsContent value="dashboard" className="flex-1 p-0 m-0 h-full overflow-hidden">
+                  <NoteDashboard
+                    note={activeNote}
+                    folderName={folders.find(f => f.id === activeNote.folderId)?.name}
+                    testSession={noteTestSession}
+                  />
+                </TabsContent>
 
                 <TabsContent value="editor" className="flex-1 p-0 m-0 h-full overflow-hidden">
                   <Editor note={activeNote} updateNote={updateNoteHandler} />
@@ -1002,7 +992,7 @@ export default function NoteApp() {
           )}
 
           {/* Folder-level study modes (when activeNote is null but view is set) */}
-          {!activeNote && !showStudyModeSelector && !showDashboard && view && ["flashcards", "quiz", "test"].includes(view) && (
+          {!activeNote && !showStudyModeSelector && view && ["flashcards", "quiz", "test"].includes(view) && (
             <div className="flex-1 flex flex-col overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b">
                 <div className="flex items-center gap-2">
@@ -1069,6 +1059,37 @@ export default function NoteApp() {
                 />
               )}
             </div>
+          )}
+
+          {/* Remove showDashboard and Dashboard references. Render FolderStudyMode if showStudyModeSelector and activeFolder and not activeNote. */}
+          {showStudyModeSelector && activeFolder && !activeNote && (
+            <FolderStudyMode
+              folderName={folders.find((f) => f.id === activeFolder)?.name || "Study"}
+              folderDescription={folders.find((f) => f.id === activeFolder)?.description}
+              onSelectMode={selectStudyMode}
+              onCreateNote={() => {
+                createNewNote()
+                setShowStudyModeSelector(false)
+              }}
+              onCreateSubfolder={(name, description) => createFolderHandler(name, activeFolder, description || "")}
+              folderNotes={folderNotes}
+              subfolders={folders.filter(f => f.parentId === activeFolder).map(f => ({ id: f.id, name: f.name, description: f.description }))}
+              folders={folders}
+              notes={notes}
+              onOpenSubfolder={(subfolderId) => {
+                setActiveFolder(subfolderId);
+                setActiveNote(null);
+                setShowStudyModeSelector(true);
+                setView(null);
+              }}
+              onEditDescription={(description) => {
+                if (activeFolder) {
+                  updateFolderDescriptionHandler(activeFolder, description)
+                }
+              }}
+              onEditName={handleEditFolderName}
+              onNoteClick={openNote}
+            />
           )}
         </main>
       </div>

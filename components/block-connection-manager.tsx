@@ -16,6 +16,7 @@ import {
   Code,
   MapPin,
   ChevronDown,
+  ChevronRight,
   User,
   HelpCircle,
   ArrowRight,
@@ -43,6 +44,9 @@ export function BlockConnectionManager({
   children
 }: BlockConnectionManagerProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [showAdd, setShowAdd] = useState(true)
+  const [showConnect, setShowConnect] = useState(false)
+  const [showConnected, setShowConnected] = useState(false)
 
   // Get all blocks that can be connected to this block
   const getConnectableBlocks = () => {
@@ -109,8 +113,10 @@ export function BlockConnectionManager({
           </Button>
         </div>
       </PopoverTrigger>
-      <PopoverContent className="w-80 p-4" align="start">
-        <div className="space-y-4">
+      <PopoverContent className="w-80 p-0 relative" align="start">
+        {/* Pointer triangle */}
+        <div className="absolute -left-2 top-1/2 -translate-y-1/2 w-0 h-0 border-y-8 border-y-transparent border-r-8 border-r-white shadow-md z-20" />
+        <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4 scrollbar-none" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           {/* Header */}
           <div className="flex items-center gap-2">
             <Link className="w-4 h-4" />
@@ -122,101 +128,117 @@ export function BlockConnectionManager({
 
           <Separator />
 
-          {/* Add New Blocks */}
-          <div className="space-y-2">
-            <h4 className="text-sm font-medium">Add New Block</h4>
-            <div className="grid grid-cols-2 gap-2">
-              {blockTypeOptions.map(option => (
-                <Button
-                  key={option.type}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleAddBlock(option.type)}
-                  className="justify-start h-auto p-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className={`p-1 rounded ${option.color}`}>
-                      {option.icon}
-                    </span>
-                    <span className="text-xs">{option.label}</span>
-                  </div>
-                </Button>
-              ))}
+          {/* Add New Block Dropdown */}
+          <div>
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowAdd(v => !v)}>
+              <h4 className="text-sm font-medium">Add New Block</h4>
+              <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+                {showAdd ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              </Button>
             </div>
+            {showAdd && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                {blockTypeOptions.map(option => (
+                  <Button
+                    key={option.type}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAddBlock(option.type)}
+                    className="justify-start h-auto p-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`p-1 rounded ${option.color}`}>
+                        {option.icon}
+                      </span>
+                      <span className="text-xs">{option.label}</span>
+                    </div>
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
 
           <Separator />
 
-          {/* Connect to Existing Blocks */}
-          {connectableBlocks.length > 0 && (
-            <div className="space-y-2">
+          {/* Connect to Existing Block Dropdown */}
+          <div>
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowConnect(v => !v)}>
               <h4 className="text-sm font-medium">Connect to Existing Block</h4>
-              <ScrollArea className="h-32">
-                <div className="space-y-1">
-                  {connectableBlocks.map(targetBlock => (
-                    <Button
-                      key={targetBlock.id}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleConnect(targetBlock.id)}
-                      className="w-full justify-start h-auto p-2"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`p-1 rounded ${BLOCK_TYPE_COLORS[targetBlock.type]}`}>
-                          {BLOCK_TYPE_ICONS[targetBlock.type]}
-                        </span>
-                        <div className="flex-1 text-left">
-                          <div className="text-xs font-medium">{BLOCK_TYPE_LABELS[targetBlock.type]}</div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {targetBlock.content || "Empty block"}
-                          </div>
-                        </div>
-                        <Plus className="w-3 h-3" />
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-              </ScrollArea>
+              <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+                {showConnect ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              </Button>
             </div>
-          )}
-
-          {/* Connected Blocks */}
-          {connectedBlocks.length > 0 && (
-            <>
-              <Separator />
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium">Connected Blocks</h4>
-                <ScrollArea className="h-32">
-                  <div className="space-y-1">
-                    {connectedBlocks.map(connectedBlock => (
-                      <div
-                        key={connectedBlock.id}
-                        className="flex items-center gap-2 p-2 rounded-md border bg-muted/50"
-                      >
-                        <span className={`p-1 rounded ${BLOCK_TYPE_COLORS[connectedBlock.type]}`}>
-                          {BLOCK_TYPE_ICONS[connectedBlock.type]}
-                        </span>
-                        <div className="flex-1 text-left">
-                          <div className="text-xs font-medium">{BLOCK_TYPE_LABELS[connectedBlock.type]}</div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {connectedBlock.content || "Empty block"}
-                          </div>
+            {showConnect && connectableBlocks.length > 0 && (
+              <div className="space-y-1 mt-2">
+                {connectableBlocks.map(targetBlock => (
+                  <Button
+                    key={targetBlock.id}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleConnect(targetBlock.id)}
+                    className="w-full justify-start h-auto p-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`p-1 rounded ${BLOCK_TYPE_COLORS[targetBlock.type]}`}>
+                        {BLOCK_TYPE_ICONS[targetBlock.type]}
+                      </span>
+                      <div className="flex-1 text-left max-w-[160px]">
+                        <div className="text-xs font-medium truncate">{BLOCK_TYPE_LABELS[targetBlock.type]}</div>
+                        <div className="text-xs text-muted-foreground truncate max-w-[160px]">
+                          {targetBlock.content || "Empty block"}
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => handleDisconnect(connectedBlock.id)}
-                        >
-                          <Unlink className="w-4 h-4 text-red-500" />
-                        </Button>
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
+                      <Plus className="w-3 h-3" />
+                    </div>
+                  </Button>
+                ))}
               </div>
-            </>
-          )}
+            )}
+            {showConnect && connectableBlocks.length === 0 && (
+              <div className="text-xs text-muted-foreground mt-2">No other blocks available to connect</div>
+            )}
+          </div>
+
+          {/* Connected Blocks Dropdown */}
+          <div>
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowConnected(v => !v)}>
+              <h4 className="text-sm font-medium">Connected Blocks</h4>
+              <Button variant="ghost" size="icon" className="h-6 w-6 p-0">
+                {showConnected ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              </Button>
+            </div>
+            {showConnected && connectedBlocks.length > 0 && (
+              <div className="space-y-1 mt-2">
+                {connectedBlocks.map(connectedBlock => (
+                  <div
+                    key={connectedBlock.id}
+                    className="flex items-center gap-2 p-2 rounded-md border bg-muted/50"
+                  >
+                    <span className={`p-1 rounded ${BLOCK_TYPE_COLORS[connectedBlock.type]}`}>
+                      {BLOCK_TYPE_ICONS[connectedBlock.type]}
+                    </span>
+                    <div className="flex-1 text-left max-w-[160px]">
+                      <div className="text-xs font-medium truncate">{BLOCK_TYPE_LABELS[connectedBlock.type]}</div>
+                      <div className="text-xs text-muted-foreground truncate max-w-[160px]">
+                        {connectedBlock.content || "Empty block"}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => handleDisconnect(connectedBlock.id)}
+                    >
+                      <Unlink className="w-4 h-4 text-red-500" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {showConnected && connectedBlocks.length === 0 && (
+              <div className="text-xs text-muted-foreground mt-2">No connected blocks</div>
+            )}
+          </div>
         </div>
       </PopoverContent>
     </Popover>
