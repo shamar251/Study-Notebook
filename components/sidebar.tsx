@@ -19,6 +19,8 @@ import {
   Settings,
   Star,
   RotateCcw,
+  User, // Add User icon for profile button
+  ChevronLeft, // For collapse button
 } from "lucide-react"
 import {
   DndContext,
@@ -156,6 +158,8 @@ export default function Sidebar({
   const [navSection, setNavSection] = useState<'notes' | 'search' | 'trash'>('notes')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
+  const [showProfileMenu, setShowProfileMenu] = useState(false); // Profile menu state
+  const [collapsed, setCollapsed] = useState(false); // Sidebar collapsed state
   const menuRef = useRef<HTMLDivElement>(null);
   const settingsBtnRef = useRef<HTMLDivElement>(null);
 
@@ -590,6 +594,14 @@ export default function Sidebar({
         {/* Left vertical icon bar */}
         <div className="flex flex-col items-center w-12 h-full border-r rounded-r-lg border-border bg-background/80 py-2 justify-between">
           <div>
+            {/* Collapse/Expand button */}
+            <div
+              className={`h-7 w-7 flex items-center justify-center mb-2 rounded-full cursor-pointer hover:bg-accent/20 transition-colors duration-150 text-muted-foreground`}
+              onClick={() => setCollapsed((c) => !c)}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+            </div>
             {/* Home/Dashboard button */}
             {/* <div
               className={`h-7 w-7 flex items-center justify-center mb-2 rounded-full cursor-pointer hover:bg-accent/20 transition-colors duration-150 ${showDashboard ? 'bg-accent/30 text-accent-foreground' : 'text-muted-foreground'}`}
@@ -608,6 +620,13 @@ export default function Sidebar({
                   ref={menuRef}
                   className="absolute bottom-12 left-1/2 -translate-x-1/2 flex flex-col items-center space-y-2 z-50"
                 >
+                  <button
+                    className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer bg-background hover:bg-accent/20 text-muted-foreground"
+                    title="Profile"
+                    onClick={() => setShowProfileMenu(true)}
+                  >
+                    <User className="w-5 h-5" />
+                  </button>
                   <button
                     className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer bg-background hover:bg-accent/20 text-muted-foreground"
                     title="Feedback"
@@ -647,262 +666,280 @@ export default function Sidebar({
           onExport={onExport}
         />
 
-        {/* Main sidebar */}
-        <ResizableBox
-          width={260}
-          height={Infinity}
-          minConstraints={[180, 0]}
-          maxConstraints={[400, 99999]}
-          axis="x"
-          handle={<span className="w-1 h-full bg-transparent cursor-ew-resize absolute right-0 top-0 z-20" />}
-          className="relative h-full modern-sidebar"
-        >
-          <div className="h-full w-full border-r rounded-lg border-border bg-background flex flex-col shadow-lg transition-all duration-200 overflow-visible">
-            {/* Header nav section */}
-            <div className="flex items-center justify-between p-2 border-b border-border bg-background/95">
-              <div className="flex gap-1">
-                <button
-                  className={`px-2 py-1 rounded-md text-sm font-medium flex items-center gap-1 ${navSection === 'notes' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/20'}`}
-                  onClick={() => setNavSection('notes')}
-                >
-                  <FolderIcon className="h-4 w-4" strokeWidth={1.5} />
-                </button>
-                <button
-                  className={`px-2 py-1 rounded-md text-sm font-medium flex items-center gap-1 ${navSection === 'search' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/20'}`}
-                  onClick={() => setNavSection('search')}
-                >
-                  <Search className="h-4 w-4" strokeWidth={1.5} />
-                </button>
+        {/* Profile Switcher Modal (placeholder) */}
+        {showProfileMenu && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+            <div className="bg-background rounded-lg shadow-lg p-6 min-w-[300px]">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Switch Profile</h2>
+                <button onClick={() => setShowProfileMenu(false)} className="text-muted-foreground hover:text-foreground">✕</button>
+              </div>
+              <div>
+                {/* Profile list and actions will go here */}
+                <div className="text-muted-foreground">Profile switching UI coming soon...</div>
               </div>
             </div>
-
-            {/* Action bar - only show for notes section */}
-            {navSection === 'notes' && (
-              <div className="flex items-center justify-start gap-1 border-b border-border bg-background/95 py-1 pl-2">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
-                        onClick={createNewNote}
-                        title="New note"
-                      >
-                        <FileText className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>New note</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
-                        onClick={handleNewFolderButton}
-                        title="New folder"
-                      >
-                        <FolderPlus className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>New folder</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
-                        onClick={handleCreateParentFolder}
-                        title="New parent folder"
-                      >
-                        <Layout className="h-4 w-4" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>New parent folder</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-            )}
-
-            {/* Search bar, only visible when 'search' tab is active */}
-            {navSection === 'search' && (
-              <div className="flex items-center px-2 py-2 border-b border-border bg-background/95">
-                <Search className="w-4 h-4 mr-2 text-muted-foreground" />
-                <Input
-                  placeholder="Search notes and tags..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </div>
-            )}
-
-            {/* Main content: notes/folders, search, or trash */}
-            {navSection === 'notes' ? (
-              renderFolderTree(null)
-            ) : navSection === 'search' ? (
-              // Search results list
-              activeNotes.length > 0 ? (
-                <div className="flex-1 overflow-auto p-1">
-                  {activeNotes.map((note) => (
-                    <div
-                      key={note.id}
-                      className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20 ${activeNote?.id === note.id ? 'bg-accent/30' : ''}`}
-                      onClick={() => setActiveNote(note)}
-                    >
-                      <FileText className="h-4 w-4 text-muted-foreground" />
-                      <span className="truncate text-sm">{note.title}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 text-muted-foreground text-center">No results found.</div>
-              )
-            ) : (
-              renderTrashContent()
-            )}
-
-            {/* Footer section */}
-
-
-            {/* Dialogs and overlays (unchanged) */}
-            <div className="p-2 flex items-center justify-between border-b border-border">
-              {/* <div
-                className="flex items-center gap-2 px-2 py-1 text-sm font-normal rounded-md cursor-pointer hover:bg-accent/20"
-                onClick={onDashboardClick}
-              >
-                <Home className="w-4 h-4" /> Dashboard
-              </div> */}
-            </div>
-
-            {activeNote && (
-              <div className="p-2 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm truncate flex-1">{activeNote.title}</span>
-                  <div
-                    className="h-6 w-6 flex items-center justify-center cursor-pointer text-muted-foreground hover:bg-accent/20 rounded-sm"
-                    onClick={deselectNote}
-                  >
-                    <ChevronDown className="h-3 w-3" />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Create Folder Dialog */}
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>{newFolderParentId === "null" ? "Create New Parent Folder" : "Create New Folder"}</DialogTitle>
-                  {newFolderParentId !== "null" && newFolderParentId !== "root" && (
-                    <DialogDescription>
-                      Creating folder inside: {folders.find((f) => f.id === newFolderParentId)?.name || ""}
-                    </DialogDescription>
-                  )}
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid gap-2">
-                    <label htmlFor="folderName" className="text-sm font-medium">
-                      Folder Name
-                    </label>
-                    <Input
-                      id="folderName"
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      placeholder="Enter folder name"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <label htmlFor="folderDescription" className="text-sm font-medium">
-                      Description
-                    </label>
-                    <Input
-                      id="folderDescription"
-                      value={newFolderDescription}
-                      onChange={(e) => setNewFolderDescription(e.target.value)}
-                      placeholder="Enter folder description (optional)"
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <div
-                    className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                    onClick={() => setIsDialogOpen(false)}
-                  >
-                    Cancel
-                  </div>
-                  <div
-                    className="inline-flex h-10 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium cursor-pointer"
-                    onClick={handleCreateFolder}
-                  >
-                    Create
-                  </div>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            {/* Rename Folder Dialog */}
-            <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Rename Folder</DialogTitle>
-                </DialogHeader>
-                <div className="grid gap-4 py-4">
-                  <div className="grid gap-2">
-                    <label htmlFor="renameFolderName" className="text-sm font-medium">
-                      New Folder Name
-                    </label>
-                    <Input
-                      id="renameFolderName"
-                      value={newFolderNameForRename}
-                      onChange={(e) => setNewFolderNameForRename(e.target.value)}
-                      placeholder="Enter new folder name"
-                      autoFocus
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <div
-                    className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                    onClick={() => setRenameDialogOpen(false)}
-                  >
-                    Cancel
-                  </div>
-                  <div
-                    className="inline-flex h-10 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium cursor-pointer"
-                    onClick={handleRenameFolder}
-                  >
-                    Rename
-                  </div>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-
-            {/* Delete Folder Dialog */}
-            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete Folder</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Are you sure you want to delete "{folderToDelete?.name}"? This will move all notes in this folder to the
-                    parent folder.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <div
-                    className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
-                    onClick={() => setDeleteDialogOpen(false)}
-                  >
-                    Cancel
-                  </div>
-                  <div
-                    className="inline-flex h-10 items-center justify-center rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 px-4 py-2 text-sm font-medium cursor-pointer"
-                    onClick={handleDeleteFolder}
-                  >
-                    Delete
-                  </div>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
           </div>
-        </ResizableBox>
+        )}
+
+        {/* Main sidebar */}
+        {!collapsed && (
+          <ResizableBox
+            width={260}
+            height={Infinity}
+            minConstraints={[180, 0]}
+            maxConstraints={[400, 99999]}
+            axis="x"
+            handle={<span className="w-1 h-full bg-transparent cursor-ew-resize absolute right-0 top-0 z-20" />}
+            className="relative h-full modern-sidebar"
+          >
+            <div className="h-full w-full border-r rounded-lg border-border bg-background flex flex-col shadow-lg transition-all duration-200 overflow-visible">
+              {/* Header nav section */}
+              <div className="flex items-center justify-between p-2 border-b border-border bg-background/95">
+                <div className="flex gap-1">
+                  <button
+                    className={`px-2 py-1 rounded-md text-sm font-medium flex items-center gap-1 ${navSection === 'notes' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/20'}`}
+                    onClick={() => setNavSection('notes')}
+                  >
+                    <FolderIcon className="h-4 w-4" strokeWidth={1.5} />
+                  </button>
+                  <button
+                    className={`px-2 py-1 rounded-md text-sm font-medium flex items-center gap-1 ${navSection === 'search' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/20'}`}
+                    onClick={() => setNavSection('search')}
+                  >
+                    <Search className="h-4 w-4" strokeWidth={1.5} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Action bar - only show for notes section */}
+              {navSection === 'notes' && (
+                <div className="flex items-center justify-start gap-1 border-b border-border bg-background/95 py-1 pl-2">
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
+                          onClick={createNewNote}
+                          title="New note"
+                        >
+                          <FileText className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>New note</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
+                          onClick={handleNewFolderButton}
+                          title="New folder"
+                        >
+                          <FolderPlus className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>New folder</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground"
+                          onClick={handleCreateParentFolder}
+                          title="New parent folder"
+                        >
+                          <Layout className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>New parent folder</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+              )}
+
+              {/* Search bar, only visible when 'search' tab is active */}
+              {navSection === 'search' && (
+                <div className="flex items-center px-2 py-2 border-b border-border bg-background/95">
+                  <Search className="w-4 h-4 mr-2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search notes and tags..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
+
+              {/* Main content: notes/folders, search, or trash */}
+              {navSection === 'notes' ? (
+                renderFolderTree(null)
+              ) : navSection === 'search' ? (
+                // Search results list
+                activeNotes.length > 0 ? (
+                  <div className="flex-1 overflow-auto p-1">
+                    {activeNotes.map((note) => (
+                      <div
+                        key={note.id}
+                        className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20 ${activeNote?.id === note.id ? 'bg-accent/30' : ''}`}
+                        onClick={() => setActiveNote(note)}
+                      >
+                        <FileText className="h-4 w-4 text-muted-foreground" />
+                        <span className="truncate text-sm">{note.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 text-muted-foreground text-center">No results found.</div>
+                )
+              ) : (
+                renderTrashContent()
+              )}
+
+              {/* Footer section */}
+
+
+              {/* Dialogs and overlays (unchanged) */}
+              <div className="p-2 flex items-center justify-between border-b border-border">
+                {/* <div
+                  className="flex items-center gap-2 px-2 py-1 text-sm font-normal rounded-md cursor-pointer hover:bg-accent/20"
+                  onClick={onDashboardClick}
+                >
+                  <Home className="w-4 h-4" /> Dashboard
+                </div> */}
+              </div>
+
+              {activeNote && (
+                <div className="p-2 border-b border-border">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm truncate flex-1">{activeNote.title}</span>
+                    <div
+                      className="h-6 w-6 flex items-center justify-center cursor-pointer text-muted-foreground hover:bg-accent/20 rounded-sm"
+                      onClick={deselectNote}
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Create Folder Dialog */}
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>{newFolderParentId === "null" ? "Create New Parent Folder" : "Create New Folder"}</DialogTitle>
+                    {newFolderParentId !== "null" && newFolderParentId !== "root" && (
+                      <DialogDescription>
+                        Creating folder inside: {folders.find((f) => f.id === newFolderParentId)?.name || ""}
+                      </DialogDescription>
+                    )}
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <label htmlFor="folderName" className="text-sm font-medium">
+                        Folder Name
+                      </label>
+                      <Input
+                        id="folderName"
+                        value={newFolderName}
+                        onChange={(e) => setNewFolderName(e.target.value)}
+                        placeholder="Enter folder name"
+                        autoFocus
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label htmlFor="folderDescription" className="text-sm font-medium">
+                        Description
+                      </label>
+                      <Input
+                        id="folderDescription"
+                        value={newFolderDescription}
+                        onChange={(e) => setNewFolderDescription(e.target.value)}
+                        placeholder="Enter folder description (optional)"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <div
+                      className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                      onClick={() => setIsDialogOpen(false)}
+                    >
+                      Cancel
+                    </div>
+                    <div
+                      className="inline-flex h-10 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium cursor-pointer"
+                      onClick={handleCreateFolder}
+                    >
+                      Create
+                    </div>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* Rename Folder Dialog */}
+              <Dialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Rename Folder</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <label htmlFor="renameFolderName" className="text-sm font-medium">
+                        New Folder Name
+                      </label>
+                      <Input
+                        id="renameFolderName"
+                        value={newFolderNameForRename}
+                        onChange={(e) => setNewFolderNameForRename(e.target.value)}
+                        placeholder="Enter new folder name"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <div
+                      className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                      onClick={() => setRenameDialogOpen(false)}
+                    >
+                      Cancel
+                    </div>
+                    <div
+                      className="inline-flex h-10 items-center justify-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 px-4 py-2 text-sm font-medium cursor-pointer"
+                      onClick={handleRenameFolder}
+                    >
+                      Rename
+                    </div>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              {/* Delete Folder Dialog */}
+              <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete Folder</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Are you sure you want to delete "{folderToDelete?.name}"? This will move all notes in this folder to the
+                      parent folder.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <div
+                      className="inline-flex h-10 items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground cursor-pointer"
+                      onClick={() => setDeleteDialogOpen(false)}
+                    >
+                      Cancel
+                    </div>
+                    <div
+                      className="inline-flex h-10 items-center justify-center rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 px-4 py-2 text-sm font-medium cursor-pointer"
+                      onClick={handleDeleteFolder}
+                    >
+                      Delete
+                    </div>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </ResizableBox>
+        )}
         <DragOverlay>
           {activeDragId ? (
             <div className="bg-accent/80 p-2 rounded-md shadow-lg border border-border">
