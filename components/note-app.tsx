@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { Plus, Search, Settings, BookOpen, Brain, Save, FolderOpen, Trash2, MoreHorizontal, ArrowLeft } from "lucide-react"
 import { useNotes, useFolders, addNote, updateNote, deleteNote, addFolder, updateFolder, deleteFolder, searchNotes, getAllChildFolderIds } from "@/hooks/use-db"
-import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, updateFolderPath, type Note as DBNote, type Folder as DBFolder, moveToTrash, restoreFromTrash, permanentDelete, type Block } from "@/lib/db"
+import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, updateFolderPath, type Note as DBNote, type Folder as DBFolder, moveToTrash, restoreFromTrash, permanentDelete, toggleFavorite, type Block } from "@/lib/db"
 import Sidebar from "@/components/sidebar"
 import Editor from "@/components/editor"
 import StudyModeSelector from "@/components/study-mode-selector"
@@ -747,6 +747,12 @@ export default function NoteApp() {
     setFolders(await db.folders.toArray());
   };
 
+  const handleToggleFavorite = async (itemId: string, itemType: 'folder' | 'note') => {
+    await toggleFavorite(itemId, itemType);
+    await reloadNotes();
+    setFolders(await db.folders.toArray());
+  };
+
   const handleEditFolderName = async (newName: string) => {
     if (!activeFolder) return;
     const folder = folders.find(f => f.id === activeFolder);
@@ -847,6 +853,7 @@ export default function NoteApp() {
           onExport={saveToFile}
           restoreItem={handleRestoreItem}
           permanentDeleteItem={handlePermanentDelete}
+          toggleFavorite={handleToggleFavorite}
         />
         <main className="flex-1 flex flex-col overflow-hidden">
           {activeNote && !showStudyModeSelector && (

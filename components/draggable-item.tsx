@@ -2,7 +2,7 @@
 
 import { useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import { File, FolderIcon, ChevronDown, ChevronRight, ArrowBigRightDash } from "lucide-react"
+import { File, FolderIcon, ChevronDown, ChevronRight, ArrowBigRightDash, Bookmark } from "lucide-react"
 import type { Folder, Note } from "@/components/note-app"
 
 interface DraggableItemProps {
@@ -14,6 +14,7 @@ interface DraggableItemProps {
   noteCount?: number
   isExpanded?: boolean
   hasChildren?: boolean
+  favorite?: boolean
   onClick?: () => void
   onToggle?: (e: React.MouseEvent) => void
   isOver?: boolean
@@ -29,6 +30,7 @@ export function DraggableItem({
   noteCount,
   isExpanded,
   hasChildren,
+  favorite,
   onClick,
   onToggle,
   isOver,

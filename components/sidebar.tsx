@@ -17,7 +17,7 @@ import {
   FolderPlus,
   Layout,
   Settings,
-  Star,
+  Bookmark,
   RotateCcw,
   User, // Add User icon for profile button
   ChevronLeft, // For collapse button
@@ -98,6 +98,7 @@ interface SidebarProps {
   onExport: () => void
   restoreItem: (itemId: string, itemType: 'folder' | 'note') => void
   permanentDeleteItem: (itemId: string, itemType: 'folder' | 'note') => void
+  toggleFavorite: (itemId: string, itemType: 'folder' | 'note') => void
 }
 
 // Custom alphanumeric sort: numbers first, then letters (case-insensitive)
@@ -138,6 +139,7 @@ export default function Sidebar({
   onExport,
   restoreItem,
   permanentDeleteItem,
+  toggleFavorite,
 }: SidebarProps) {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     root: true,
@@ -155,7 +157,7 @@ export default function Sidebar({
   const [overId, setOverId] = useState<string | null>(null)
   const [dragMode, setDragMode] = useState<'reorder' | 'move' | null>(null)
   const [dragStartPosition, setDragStartPosition] = useState<{ x: number; y: number } | null>(null)
-  const [navSection, setNavSection] = useState<'notes' | 'search' | 'trash'>('notes')
+  const [navSection, setNavSection] = useState<'notes' | 'search' | 'favorites' | 'trash'>('notes')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showSettingsMenu, setShowSettingsMenu] = useState(false)
   const [showProfileMenu, setShowProfileMenu] = useState(false); // Profile menu state
@@ -383,6 +385,7 @@ export default function Sidebar({
                   noteCount={folderNoteCount}
                   isExpanded={isExpanded}
                   hasChildren={hasChildren}
+                  favorite={folder.favorite}
                   onClick={() => {
                     setActiveNote(null);
                     setActiveFolder(folder.id);
@@ -405,6 +408,13 @@ export default function Sidebar({
                   }}
                 >
                   <FolderIcon className="w-4 h-4 mr-2" /> New folder
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  onClick={() => toggleFavorite(folder.id, 'folder')}
+                >
+                  <Bookmark className="w-4 h-4 mr-2" />
+                  {folder.favorite ? 'Remove from bookmarks' : 'Add to bookmarks'}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem
@@ -452,6 +462,7 @@ export default function Sidebar({
                           name={note.title}
                           depth={depth + 1}
                           isActive={activeNote?.id === note.id}
+                          favorite={note.favorite}
                           onClick={() => {
                             setActiveFolder(null);
                             setActiveNote(note);
@@ -464,6 +475,13 @@ export default function Sidebar({
                         <ContextMenuItem onClick={() => setActiveNote(note)}>
                           <Edit className="w-4 h-4 mr-2" /> Edit note
                         </ContextMenuItem>
+                        <ContextMenuItem
+                          onClick={() => toggleFavorite(note.id, 'note')}
+                        >
+                          <Bookmark className="w-4 h-4 mr-2" />
+                          {note.favorite ? 'Remove from bookmarks' : 'Add to bookmarks'}
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
                         <ContextMenuItem onClick={() => deleteNote(note.id)} className="text-destructive">
                           <Trash2 className="w-4 h-4 mr-2" /> Delete
                         </ContextMenuItem>
@@ -492,6 +510,7 @@ export default function Sidebar({
                 name={note.title}
                 depth={0}
                 isActive={activeNote?.id === note.id}
+                favorite={note.favorite}
                 onClick={() => {
                   setActiveFolder(null);
                   setActiveNote(note);
@@ -504,6 +523,13 @@ export default function Sidebar({
               <ContextMenuItem onClick={() => setActiveNote(note)}>
                 <Edit className="w-4 h-4 mr-2" /> Edit note
               </ContextMenuItem>
+              <ContextMenuItem
+                onClick={() => toggleFavorite(note.id, 'note')}
+              >
+                <Bookmark className="w-4 h-4 mr-2" />
+                {note.favorite ? 'Remove from bookmarks' : 'Add to bookmarks'}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
               <ContextMenuItem onClick={() => deleteNote(note.id)} className="text-destructive">
                 <Trash2 className="w-4 h-4 mr-2" /> Delete
               </ContextMenuItem>
@@ -526,6 +552,97 @@ export default function Sidebar({
     setNewFolderParentId(activeFolder || "null");
     setIsDialogOpen(true);
   }
+
+  const renderFavoritesContent = () => {
+    const favoriteFolders = activeFolders.filter(folder => folder.favorite);
+    const favoriteNotes = activeNotes.filter(note => note.favorite);
+
+    return (
+      <div className="flex-1 overflow-auto p-1">
+        {favoriteFolders.length === 0 && favoriteNotes.length === 0 ? (
+          <div className="p-4 text-muted-foreground text-center">No bookmarks yet</div>
+        ) : (
+          <div>
+            {favoriteFolders.map((folder) => (
+              <ContextMenu key={folder.id}>
+                <ContextMenuTrigger>
+                  <div
+                    className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20 ${activeFolder === folder.id && !activeNote ? 'bg-accent/30' : ''}`}
+                    onClick={() => {
+                      setActiveNote(null);
+                      setActiveFolder(folder.id);
+                      handleFolderRowClick(folder.id);
+                    }}
+                  >
+                    <FolderIcon className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate text-sm">{folder.name}</span>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-56">
+                  <ContextMenuItem onClick={() => {
+                    setActiveNote(null);
+                    setActiveFolder(folder.id);
+                    handleFolderRowClick(folder.id);
+                  }}>
+                    <FolderIcon className="w-4 h-4 mr-2" /> Open folder
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => toggleFavorite(folder.id, 'folder')}>
+                    <Bookmark className="w-4 h-4 mr-2" /> Remove from bookmarks
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    onClick={() => {
+                      setFolderToRename(folder)
+                      setRenameDialogOpen(true)
+                    }}
+                  >
+                    <Edit className="w-4 h-4 mr-2" /> Rename...
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    onClick={() => {
+                      setFolderToDelete(folder)
+                      setDeleteDialogOpen(true)
+                    }}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            {favoriteNotes.map((note) => (
+              <ContextMenu key={note.id}>
+                <ContextMenuTrigger>
+                  <div
+                    className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/20 ${activeNote?.id === note.id ? 'bg-accent/30' : ''}`}
+                    onClick={() => {
+                      setActiveFolder(null);
+                      setActiveNote(note);
+                    }}
+                  >
+                    <FileText className="h-4 w-4 text-muted-foreground" />
+                    <span className="truncate text-sm">{note.title}</span>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-56">
+                  <ContextMenuItem onClick={() => setActiveNote(note)}>
+                    <Edit className="w-4 h-4 mr-2" /> Edit note
+                  </ContextMenuItem>
+                  <ContextMenuItem onClick={() => toggleFavorite(note.id, 'note')}>
+                    <Bookmark className="w-4 h-4 mr-2" /> Remove from bookmarks
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem onClick={() => deleteNote(note.id)} className="text-destructive">
+                    <Trash2 className="w-4 h-4 mr-2" /> Delete
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const renderTrashContent = () => {
     return (
@@ -632,7 +749,7 @@ export default function Sidebar({
                     title="Feedback"
                     onClick={() => { /* handle feedback */ }}
                   >
-                    <Star className="w-5 h-5" />
+                    <Bookmark className="w-5 h-5" />
                   </button>
                   <button
                     className="h-7 w-7 flex items-center justify-center rounded-md cursor-pointer bg-background hover:bg-accent/20 text-muted-foreground"
@@ -709,6 +826,12 @@ export default function Sidebar({
                   >
                     <Search className="h-4 w-4" strokeWidth={1.5} />
                   </button>
+                  <button
+                    className={`px-2 py-1 rounded-md text-sm font-medium flex items-center gap-1 ${navSection === 'favorites' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent/20'}`}
+                    onClick={() => setNavSection('favorites')}
+                  >
+                    <Bookmark className="h-4 w-4" strokeWidth={1.5} />
+                  </button>
                 </div>
               </div>
 
@@ -769,7 +892,7 @@ export default function Sidebar({
                 </div>
               )}
 
-              {/* Main content: notes/folders, search, or trash */}
+              {/* Main content: notes/folders, search, favorites, or trash */}
               {navSection === 'notes' ? (
                 renderFolderTree(null)
               ) : navSection === 'search' ? (
@@ -790,6 +913,8 @@ export default function Sidebar({
                 ) : (
                   <div className="p-4 text-muted-foreground text-center">No results found.</div>
                 )
+              ) : navSection === 'favorites' ? (
+                renderFavoritesContent()
               ) : (
                 renderTrashContent()
               )}

@@ -12,6 +12,7 @@ export interface Note {
   deletedAt?: number;
   migratedToHow?: boolean;
   autoFixedLegacyLinks?: boolean;
+  favorite?: boolean;
   studyStats?: {
     quizAttempts: number;
     quizCorrect: number;
@@ -60,6 +61,7 @@ export interface Folder {
   order: number;
   path: string[];
   deletedAt?: number;
+  favorite?: boolean;
 }
 
 export interface Operation {
@@ -155,6 +157,14 @@ export class StudyNotebookDB extends Dexie {
     this.version(7).stores({
       notes: 'id, title, folderId, updatedAt, lastStudied, tags, order, deletedAt',
       folders: 'id, name, parentId, description, createdAt, order, path, deletedAt',
+      operations: '++id, type, timestamp, data',
+      testSessions: 'id, noteId, folderId, startTime',
+      quizSessions: 'id, folderId, startTime'
+    });
+
+    this.version(8).stores({
+      notes: 'id, title, folderId, updatedAt, lastStudied, tags, order, deletedAt, favorite',
+      folders: 'id, name, parentId, description, createdAt, order, path, deletedAt, favorite',
       operations: '++id, type, timestamp, data',
       testSessions: 'id, noteId, folderId, startTime',
       quizSessions: 'id, folderId, startTime'
@@ -425,4 +435,32 @@ export async function permanentDelete(itemId: string, itemType: 'folder' | 'note
   } else {
     await db.notes.delete(itemId);
   }
+}
+
+export async function toggleFavorite(itemId: string, itemType: 'folder' | 'note'): Promise<void> {
+  if (itemType === 'folder') {
+    const folder = await db.folders.get(itemId);
+    if (folder) {
+      await db.folders.put({
+        ...folder,
+        favorite: !folder.favorite
+      });
+    }
+  } else {
+    const note = await db.notes.get(itemId);
+    if (note) {
+      await db.notes.put({
+        ...note,
+        favorite: !note.favorite
+      });
+    }
+  }
+}
+
+export async function getFavorites(): Promise<{ notes: Note[], folders: Folder[] }> {
+  const allNotes = await db.notes.toArray();
+  const allFolders = await db.folders.toArray();
+  const notes = allNotes.filter(note => note.favorite === true);
+  const folders = allFolders.filter(folder => folder.favorite === true);
+  return { notes, folders };
 }
