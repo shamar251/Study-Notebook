@@ -804,7 +804,7 @@ export default function Sidebar({
           <ResizableBox
             width={260}
             height={Infinity}
-            minConstraints={[180, 0]}
+            minConstraints={[200, 0]}
             maxConstraints={[400, 99999]}
             axis="x"
             handle={<span className="w-1 h-full bg-transparent cursor-ew-resize absolute right-0 top-0 z-20" />}

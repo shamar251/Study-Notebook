@@ -480,12 +480,12 @@ export default function FolderStudyMode({
   return (
     <div className="flex-1 overflow-auto w-full h-full border-t rounded-lg border-gray-200">
       <div className="w-full p-5" >
-        <div className="flex flex-col items-start mb-2 ">
-          <div className="flex items-center gap-2 mb-1 pt-2 pl-1">
-            <FolderIcon className="w-7 h-7 text-black" />
+        <div className="flex flex-col items-start mb-4">
+          <div className="flex items-center gap-3 mb-2 pt-2 pl-1">
+            <FolderIcon className="w-6 h-6 text-gray-600 dark:text-gray-400" />
             {isEditingName ? (
               <input
-                className="text-2xl font-medium bg-transparent border-none outline-none focus:ring-0 focus:border-none shadow-none" value={newName}
+                className="text-xl font-semibold text-gray-900 dark:text-gray-100 bg-transparent border-none outline-none focus:ring-0 focus:border-none shadow-none" value={newName}
                 onChange={e => setNewName(e.target.value)}
                 onBlur={handleNameBlur}
                 onKeyDown={e => { if (e.key === "Enter") handleNameBlur() }}
@@ -494,7 +494,7 @@ export default function FolderStudyMode({
               />
             ) : (
               <h1
-                className="text-2xl font-medium cursor-pointer"
+                className="text-xl font-semibold text-gray-900 dark:text-gray-100 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                 onClick={() => setIsEditingName(true)}
               >
                 {folderName}

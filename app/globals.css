@@ -243,3 +243,39 @@ body.dark .modern-sidebar .border-b {
 body.dark .modern-sidebar .w-1.h-full.bg-accent {
   background: #27272a;
 }
+
+/* Ensure icons maintain minimum size when sidebar is resized */
+.modern-sidebar svg {
+  min-width: 20px !important;
+  min-height: 20px !important;
+  flex-shrink: 0;
+}
+
+.modern-sidebar .w-5.h-5,
+.modern-sidebar .h-5.w-5 {
+  min-width: 20px !important;
+  min-height: 20px !important;
+  flex-shrink: 0;
+}
+
+.modern-sidebar .w-4.h-4,
+.modern-sidebar .h-4.w-4 {
+  min-width: 16px !important;
+  min-height: 16px !important;
+  flex-shrink: 0;
+}
+
+.modern-sidebar .w-3.h-3,
+.modern-sidebar .h-3.w-3 {
+  min-width: 12px !important;
+  min-height: 12px !important;
+  flex-shrink: 0;
+}
+
+/* Ensure icon containers don't shrink below minimum */
+.modern-sidebar button svg,
+.modern-sidebar div svg {
+  min-width: 20px !important;
+  min-height: 20px !important;
+  flex-shrink: 0;
+}
