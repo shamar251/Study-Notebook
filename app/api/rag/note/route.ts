@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEmbedding, searchQdrant } from '@/lib/brain/processors/embed';
 import axios from 'axios';
-import { BlockConnectionManager } from '@/lib/block-connections';
 import type { Block } from '@/lib/db';
 import http from 'http';
 import https from 'https';
@@ -17,7 +16,7 @@ async function generateAlternativeQueries(question: string, numVariants = 5): Pr
   const prompt = `You are an AI language model assistant. Your task is to generate ${numVariants} different versions of the given user question to retrieve relevant documents from a vector database. By generating multiple perspectives on the user question, your goal is to help the user overcome some of the limitations of the distance-based similarity search. Provide these alternative questions separated by newlines.\nOriginal question: ${question}`;
   try {
     const ollamaRes = await axios.post('http://localhost:11434/api/generate', {
-      model: 'llama3.1',
+      model: 'deepseek-7b-chat',
       prompt
     });
     const data = ollamaRes.data as { response: string };
@@ -30,193 +29,32 @@ async function generateAlternativeQueries(question: string, numVariants = 5): Pr
   return [question]; // fallback to original question
 }
 
-// Helper to group linked blocks by entity (WHO block and its connected WHAT blocks)
-function groupBlocksByEntity(blocks: Block[]): { entityId: string, combinedContent: string, blocks: Block[] }[] {
-  // Compute groups using BlockConnectionManager
-  const groupMap = BlockConnectionManager['computeGroupsSync'](blocks);
-  const groups: Record<string, Block[]> = {};
-  for (const block of blocks) {
-    const groupId = groupMap[block.id];
-    if (!groups[groupId]) groups[groupId] = [];
-    groups[groupId].push(block);
-  }
-  // For each group, combine the content of all blocks
-  return Object.entries(groups).map(([entityId, groupBlocks]) => ({
-    entityId,
-    combinedContent: groupBlocks.map(b => b.content).filter(Boolean).join('\n'),
-    blocks: groupBlocks
-  }));
-}
+// Helper to embed and store note content in Qdrant
+async function embedAndStoreNote(note_id: string, folder_id: string, allBlocks: Block[]) {
+  console.log(`[RAG] No embeddings found for note ${note_id}, embedding and storing now...`);
 
-// Helper to gather content from a block and all its direct connections (recursively, bidirectional, no cycles)
-function gatherConnectedContentBidirectional(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
-  if (!block || visited.has(block.id)) return '';
-  visited.add(block.id);
-  let content = block.content || '';
-  // Forward connections
-  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
-    for (const linkedId of block.linkedBlockIds) {
-      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
-      if (linkedBlock && linkedBlock.content) {
-        content += '\n' + `[${linkedBlock.type}] ${linkedBlock.content}`;
-        content += gatherConnectedContentBidirectional(linkedBlock, allBlocks, visited);
-      }
-    }
-  }
-  // Backward connections
-  for (const other of allBlocks) {
-    if (other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && !visited.has(other.id)) {
-      content += '\n' + `[${other.type}] ${other.content}`;
-      content += gatherConnectedContentBidirectional(other, allBlocks, visited);
-    }
-  }
-  return content;
-}
+  try {
+    const response = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        blocks: allBlocks,
+        note_id,
+        folder_id
+      })
+    });
 
-// Helper to gather and group connected content by type for a block (no repeats)
-function gatherGroupedConnectedContent(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
-  if (!block || visited.has(block.id)) return '';
-  visited.add(block.id);
-  let line = `[${block.type}] ${block.content || ''}`;
-  // Collect directly connected blocks by type
-  const connected: Record<string, Set<string>> = {};
-  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
-    for (const linkedId of block.linkedBlockIds) {
-      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
-      if (linkedBlock && !visited.has(linkedBlock.id)) {
-        if (!connected[linkedBlock.type]) connected[linkedBlock.type] = new Set();
-        connected[linkedBlock.type].add(linkedBlock.content || '');
-      }
+    if (!response.ok) {
+      throw new Error(`Failed to embed note: ${response.statusText}`);
     }
-  }
-  // Backward connections
-  for (const other of allBlocks) {
-    if (other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && !visited.has(other.id)) {
-      if (!connected[other.type]) connected[other.type] = new Set();
-      connected[other.type].add(other.content || '');
-    }
-  }
-  // Append grouped connected content (deduplicated)
-  for (const type of Object.keys(connected)) {
-    for (const content of connected[type]) {
-      if (content && content.trim().length > 0) {
-        line += ` [${type}] ${content}`;
-      }
-    }
-  }
-  return line;
-}
 
-// Helper to gather and group connected content by type for a block (no repeats, inline [when])
-function gatherGroupedConnectedContentInlineWhen(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
-  if (!block || visited.has(block.id)) return '';
-  visited.add(block.id);
-  let line = `[${block.type}] ${block.content || ''}`;
-  // Inline [when] blocks directly connected
-  let inlinedWhen = '';
-  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
-    for (const linkedId of block.linkedBlockIds) {
-      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
-      if (linkedBlock && linkedBlock.type === 'when' && linkedBlock.content && !visited.has(linkedBlock.id)) {
-        inlinedWhen += ` [when] ${linkedBlock.content}`;
-        visited.add(linkedBlock.id);
-      }
-    }
+    const result = await response.json();
+    console.log(`[RAG] Successfully embedded note ${note_id}:`, result);
+    return true;
+  } catch (error) {
+    console.error(`[RAG] Failed to embed note ${note_id}:`, error);
+    return false;
   }
-  // Backward inline [when]
-  for (const other of allBlocks) {
-    if (other.type === 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
-      inlinedWhen += ` [when] ${other.content}`;
-      visited.add(other.id);
-    }
-  }
-  // Collect other directly connected blocks by type (excluding [when])
-  const connected: Record<string, Set<string>> = {};
-  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
-    for (const linkedId of block.linkedBlockIds) {
-      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
-      if (linkedBlock && linkedBlock.type !== 'when' && !visited.has(linkedBlock.id)) {
-        if (!connected[linkedBlock.type]) connected[linkedBlock.type] = new Set();
-        connected[linkedBlock.type].add(linkedBlock.content || '');
-      }
-    }
-  }
-  // Backward for other types
-  for (const other of allBlocks) {
-    if (other.type !== 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
-      if (!connected[other.type]) connected[other.type] = new Set();
-      connected[other.type].add(other.content || '');
-    }
-  }
-  // Append grouped connected content (deduplicated, excluding [when])
-  for (const type of Object.keys(connected)) {
-    for (const content of connected[type]) {
-      if (content && content.trim().length > 0) {
-        line += ` [${type}] ${content}`;
-      }
-    }
-  }
-  line += inlinedWhen;
-  return line;
-}
-
-// Helper to gather and group connected content by type for a block (no repeats, inline [when] as natural language)
-function gatherGroupedConnectedContentInlineWhenNatural(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
-  if (!block || visited.has(block.id)) return '';
-  visited.add(block.id);
-  let line = `[${block.type}] ${block.content || ''}`;
-  // Inline [when] blocks directly connected, as natural language
-  let whenPhrase = '';
-  let whenTimes: string[] = [];
-  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
-    for (const linkedId of block.linkedBlockIds) {
-      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
-      if (linkedBlock && linkedBlock.type === 'when' && linkedBlock.content && !visited.has(linkedBlock.id)) {
-        whenTimes.push(linkedBlock.content);
-        visited.add(linkedBlock.id);
-      }
-    }
-  }
-  // Backward inline [when]
-  for (const other of allBlocks) {
-    if (other.type === 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
-      whenTimes.push(other.content);
-      visited.add(other.id);
-    }
-  }
-  if (whenTimes.length === 1) {
-    whenPhrase = ` at ${whenTimes[0]}`;
-  } else if (whenTimes.length > 1) {
-    whenPhrase = ` at ${whenTimes.join(' or ')}`;
-  }
-  // Collect other directly connected blocks by type (excluding [when])
-  const connected: Record<string, Set<string>> = {};
-  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
-    for (const linkedId of block.linkedBlockIds) {
-      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
-      if (linkedBlock && linkedBlock.type !== 'when' && !visited.has(linkedBlock.id)) {
-        if (!connected[linkedBlock.type]) connected[linkedBlock.type] = new Set();
-        connected[linkedBlock.type].add(linkedBlock.content || '');
-      }
-    }
-  }
-  // Backward for other types
-  for (const other of allBlocks) {
-    if (other.type !== 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
-      if (!connected[other.type]) connected[other.type] = new Set();
-      connected[other.type].add(other.content || '');
-    }
-  }
-  // Append grouped connected content (deduplicated, excluding [when])
-  for (const type of Object.keys(connected)) {
-    for (const content of connected[type]) {
-      if (content && content.trim().length > 0) {
-        line += ` [${type}] ${content}`;
-      }
-    }
-  }
-  line += whenPhrase;
-  return line;
 }
 
 // --- NEW: Block-to-fact mapping for all block types ---
@@ -274,38 +112,75 @@ function blockToFactLine(block: Block, allBlocks: Block[]): string {
 }
 
 export async function POST(req: NextRequest) {
-  const { note_id, query, topK = 10, allBlocks } = await req.json();
+  const startTotal = Date.now();
+  const { note_id, query, topK = 10, allBlocks, folder_id } = await req.json();
   if (!note_id || !query || !allBlocks) {
     return NextResponse.json({ error: 'Missing note_id, query, or allBlocks' }, { status: 400 });
   }
 
-  // Group blocks by entity (linked blocks)
-  const entities = groupBlocksByEntity(allBlocks);
+  // OPTIMIZATION: This endpoint now uses pre-stored embeddings from Qdrant
+  // instead of generating embeddings on-the-fly during chat requests.
+  // This significantly improves performance by eliminating redundant embedding generation.
 
-  // Generate alternative queries
-  const altQueries = await generateAlternativeQueries(query, 5);
+  const t0 = Date.now();
 
-  // Retrieve results for each alternative query using combined entity content
+  // Generate alternative queries for better retrieval
+  const altQueries = await generateAlternativeQueries(query, 3); // Reduced from 5 to 3 for efficiency
+  const t1 = Date.now();
+  console.log(`[TIMING] generateAlternativeQueries: ${t1 - t0}ms`);
+
+  // Retrieve results using pre-stored embeddings in Qdrant
   let allResults: any[] = [];
+  let embeddingTime = 0;
+  let qdrantTime = 0;
+
   for (const altQuery of altQueries) {
+    const tEmbedStart = Date.now();
+    // Only embed the user query - use pre-stored embeddings for content
     const queryEmbedding = await getEmbedding(altQuery);
+    embeddingTime += Date.now() - tEmbedStart;
+
     if (!queryEmbedding || !Array.isArray(queryEmbedding) || queryEmbedding.length !== 768) {
       throw new Error('Embedding failed or returned wrong dimension (expected 768).');
     }
-    // For each entity, embed the combined content and search Qdrant
-    for (const entity of entities) {
-      if (!entity.combinedContent || entity.combinedContent.trim().length === 0) {
-        console.warn('Skipping entity with empty combinedContent:', entity.entityId);
-        continue;
+
+    // Search Qdrant for pre-stored embeddings matching this note
+    const filter = { must: [{ key: 'note_id', match: { value: note_id } }] };
+    const tQdrantStart = Date.now();
+    const results = await searchQdrant({ queryEmbedding, filter, topK: 15 }); // Increased topK since we're not doing entity grouping
+    qdrantTime += Date.now() - tQdrantStart;
+    allResults = allResults.concat(results);
+  }
+
+  const t2 = Date.now();
+  console.log(`[TIMING] Query embedding total: ${embeddingTime}ms`);
+  console.log(`[TIMING] Qdrant search total: ${qdrantTime}ms`);
+  console.log(`[TIMING] Retrieval loop: ${t2 - t1}ms`);
+
+  // FALLBACK: If no results found, the note might not be embedded yet
+  // This handles cases where:
+  // 1. A note was just created and hasn't been saved/embedded yet
+  // 2. A note exists but its embeddings were deleted from Qdrant
+  // 3. A note was imported but not yet indexed
+  // Automatically embed it and retry the search
+  if (allResults.length === 0 && allBlocks.length > 0) {
+    console.log(`[RAG] No results found for note ${note_id}, attempting to embed note...`);
+
+    const embedSuccess = await embedAndStoreNote(note_id, folder_id, allBlocks);
+
+    if (embedSuccess) {
+      // Retry the search with the newly embedded content
+      console.log(`[RAG] Retrying search after embedding note ${note_id}...`);
+      allResults = [];
+
+      for (const altQuery of altQueries) {
+        const queryEmbedding = await getEmbedding(altQuery);
+        const filter = { must: [{ key: 'note_id', match: { value: note_id } }] };
+        const results = await searchQdrant({ queryEmbedding, filter, topK: 15 });
+        allResults = allResults.concat(results);
       }
-      const entityEmbedding = await getEmbedding(entity.combinedContent);
-      if (!entityEmbedding || !Array.isArray(entityEmbedding) || entityEmbedding.length !== 768) {
-        throw new Error('Entity embedding failed or returned wrong dimension (expected 768).');
-      }
-      const filter = { must: [{ key: 'note_id', match: { value: note_id } }] };
-      const results = await searchQdrant({ queryEmbedding: entityEmbedding, filter, topK: 10 });
-      console.log('Qdrant raw results:', results); // DEBUG: log raw Qdrant results
-      allResults = allResults.concat(results);
+
+      console.log(`[RAG] Found ${allResults.length} results after embedding note ${note_id}`);
     }
   }
 
@@ -317,6 +192,8 @@ export async function POST(req: NextRequest) {
     seen.add(key);
     return true;
   });
+  const t3 = Date.now();
+  console.log(`[TIMING] Deduplication: ${t3 - t2}ms`);
 
   // After deduplication, log the deduped results
   console.log('Deduped results:', dedupedResults);
@@ -324,7 +201,7 @@ export async function POST(req: NextRequest) {
   const blockTypesInContext = dedupedResults.map(r => r.payload?.type).filter(Boolean);
   console.log('Block types in context:', blockTypesInContext);
 
-  // --- NEW: Build LLM-friendly context using blockToFactLine ---
+  // Build LLM-friendly context using blockToFactLine
   const instructions = `Instructions:\n- Each line below is a fact, with the format depending on the type of information (Entity, Time, Place, Reason, Method, Media, Check, etc.).\n- Use these facts to answer the question.\n- Do not repeat identical facts or answers.\n- If you can infer a likely time, place, or connection, state your reasoning.\n`;
 
   // Use all deduped results' blockIds to build the context
@@ -334,6 +211,8 @@ export async function POST(req: NextRequest) {
       : `${r.payload?.type}: ${r.payload?.content || ''}`)
     .filter(Boolean);
   const context = `${instructions}\nFacts:\n${factLines.join('\n')}\n`;
+  const t4 = Date.now();
+  console.log(`[TIMING] Context building: ${t4 - t3}ms`);
 
   const prompt = `You are a helpful study assistant. Use ONLY the following note data to answer the user's question. If the answer is not in the context, say "I don't know."\n\n${context}\nQuestion: ${query}\nAnswer:`;
 
@@ -346,6 +225,7 @@ export async function POST(req: NextRequest) {
 
   if (context) {
     try {
+      const tLLMStart = Date.now();
       // Use Node.js http/https for streaming
       const url = new URL('http://localhost:11434/api/generate');
       const isHttps = url.protocol === 'https:';
@@ -388,12 +268,13 @@ export async function POST(req: NextRequest) {
         req.end();
       });
       console.log('[Ollama] Full answer:', answer);
+      console.log(`[TIMING] LLM call: ${Date.now() - tLLMStart}ms`);
     } catch (err) {
       answer = 'Failed to generate answer.';
     }
   } else {
     answer = 'No relevant content found to answer the question.';
   }
-
+  console.log(`[TIMING] Total endpoint time: ${Date.now() - startTotal}ms`);
   return NextResponse.json({ results: dedupedResults, answer });
 } 

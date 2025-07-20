@@ -4,6 +4,10 @@ import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
 import { supabase } from '../lib/supabaseClient';
 
+// @ts-ignore
+const isElectron = typeof window !== 'undefined' && window?.electronAPI;
+const ipcRenderer = isElectron ? window.require?.('electron').ipcRenderer : undefined;
+
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -27,6 +31,7 @@ export default function SettingsDialog({
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ollamaEnabled, setOllamaEnabled] = useState<boolean>(true);
 
   useEffect(() => {
     const session = supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -36,6 +41,11 @@ export default function SettingsDialog({
     return () => {
       listener.subscription.unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('ollamaEnabled');
+    if (stored !== null) setOllamaEnabled(stored === 'true');
   }, []);
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -54,6 +64,16 @@ export default function SettingsDialog({
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
+  };
+
+  const handleToggleOllama = async () => {
+    const newValue = !ollamaEnabled;
+    setOllamaEnabled(newValue);
+    localStorage.setItem('ollamaEnabled', String(newValue));
+    // If running in Electron, send IPC to main process
+    if (ipcRenderer) {
+      await ipcRenderer.invoke('ollama-toggle', newValue);
+    }
   };
 
   return (
@@ -75,6 +95,14 @@ export default function SettingsDialog({
               <Switch checked={darkMode} onCheckedChange={onToggleDarkMode} />
             </div>
             <div className="text-xs text-muted-foreground">Great for reading at night</div>
+          </div>
+          {/* Ollama Embeddings Section */}
+          <div className="pt-2 border-t border-border">
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-semibold text-base">Ollama Embeddings</span>
+              <Switch checked={ollamaEnabled} onCheckedChange={handleToggleOllama} />
+            </div>
+            <div className="text-xs text-muted-foreground">Enable or disable local Ollama embeddings</div>
           </div>
           {/* Import/Export Section */}
           <div className="pt-2 border-t border-border">

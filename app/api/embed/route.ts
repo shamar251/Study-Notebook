@@ -4,6 +4,7 @@ import { getEmbedding, upsertQdrantVector } from '@/lib/brain/processors/embed';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(req: NextRequest) {
+  const startTotal = Date.now();
   const { content, note_id, folder_id, blocks } = await req.json();
   if ((!content && !blocks) || !note_id) {
     return NextResponse.json({ error: 'Missing content/blocks or note_id' }, { status: 400 });
@@ -11,6 +12,7 @@ export async function POST(req: NextRequest) {
 
   // If blocks are provided, use semantic chunking
   if (blocks && Array.isArray(blocks)) {
+    const t0 = Date.now();
     const processedBlockIds = new Set();
     // For each WHO block, concatenate its content with all connected WHAT blocks (legacy combined chunk)
     for (const block of blocks) {
@@ -35,7 +37,9 @@ export async function POST(req: NextRequest) {
         const chunks = chunkText(combined);
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i];
+          const tEmbedStart = Date.now();
           const embedding = await getEmbedding(chunk);
+          const tEmbedEnd = Date.now();
           await upsertQdrantVector({
             id: uuidv4(),
             embedding,
@@ -52,6 +56,7 @@ export async function POST(req: NextRequest) {
               linkedBlocks: connectedWhats.map((b: any) => ({ id: b.id, type: b.type })),
             },
           });
+          console.log(`[TIMING] Embedding+Upsert (who+what block, chunk ${i}): ${tEmbedEnd - tEmbedStart}ms`);
         }
         processedBlockIds.add(block.id); // Mark who block as processed
       }
@@ -72,7 +77,9 @@ export async function POST(req: NextRequest) {
       }
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
+        const tEmbedStart = Date.now();
         const embedding = await getEmbedding(chunk);
+        const tEmbedEnd = Date.now();
         await upsertQdrantVector({
           id: uuidv4(),
           embedding,
@@ -86,18 +93,24 @@ export async function POST(req: NextRequest) {
             ...(linkedBlocks.length > 0 ? { linkedBlocks } : {}),
           },
         });
+        console.log(`[TIMING] Embedding+Upsert (block ${block.id}, chunk ${i}): ${tEmbedEnd - tEmbedStart}ms`);
       }
       processedBlockIds.add(block.id); // Mark as processed
     }
+    console.log(`[TIMING] Block processing total: ${Date.now() - t0}ms`);
+    console.log(`[TIMING] Total endpoint time: ${Date.now() - startTotal}ms`);
     return NextResponse.json({ success: true, blocks: blocks.length });
   }
 
   // Fallback: old behavior for plain content
   if (content) {
+    const t0 = Date.now();
     const chunks = chunkText(content);
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
+      const tEmbedStart = Date.now();
       const embedding = await getEmbedding(chunk);
+      const tEmbedEnd = Date.now();
       await upsertQdrantVector({
         id: uuidv4(),
         embedding,
@@ -108,9 +121,13 @@ export async function POST(req: NextRequest) {
           position: i,
         },
       });
+      console.log(`[TIMING] Embedding+Upsert (plain content, chunk ${i}): ${tEmbedEnd - tEmbedStart}ms`);
     }
+    console.log(`[TIMING] Content processing total: ${Date.now() - t0}ms`);
+    console.log(`[TIMING] Total endpoint time: ${Date.now() - startTotal}ms`);
     return NextResponse.json({ success: true, chunks: chunks.length });
   }
 
+  console.log(`[TIMING] Total endpoint time: ${Date.now() - startTotal}ms`);
   return NextResponse.json({ error: 'No content or blocks to embed.' }, { status: 400 });
 } 

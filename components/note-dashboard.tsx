@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
-import type { Note } from "@/components/note-app";
-import { Layers, ListChecks, CheckCircle, Timer } from "lucide-react";
+import { Note } from "@/lib/db";
+import { Layers, ListChecks, Timer, Bot, Sparkles } from "lucide-react";
 
 interface NoteChatWidgetProps {
   note?: Note;
@@ -10,43 +10,220 @@ interface NoteChatWidgetProps {
 interface ChatMessage {
   sender: "user" | "ai";
   text: string;
+  timestamp?: number;
 }
 
+// Global chat cache to persist across component unmounts
+const chatCache: { [noteId: string]: ChatMessage[] } = {};
+
+// Cache key for localStorage
+const CHAT_CACHE_KEY = 'study-notebook-chat-cache';
+
+// Load chat cache from localStorage
+const loadChatCache = (): { [noteId: string]: ChatMessage[] } => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const cached = localStorage.getItem(CHAT_CACHE_KEY);
+    return cached ? JSON.parse(cached) : {};
+  } catch (error) {
+    console.error('Failed to load chat cache:', error);
+    return {};
+  }
+};
+
+// Save chat cache to localStorage
+const saveChatCache = (cache: { [noteId: string]: ChatMessage[] }) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(cache));
+  } catch (error) {
+    console.error('Failed to save chat cache:', error);
+  }
+};
+
+// Initialize cache from localStorage
+const initializeCache = () => {
+  const loadedCache = loadChatCache();
+  Object.assign(chatCache, loadedCache);
+};
+
+// Initialize cache on module load
+initializeCache();
+
+// Utility functions for chat cache management
+export const chatCacheUtils = {
+  // Get conversation for a specific note
+  getConversation: (noteId: string): ChatMessage[] => {
+    return chatCache[noteId] || [];
+  },
+
+  // Set conversation for a specific note
+  setConversation: (noteId: string, conversation: ChatMessage[]) => {
+    chatCache[noteId] = conversation;
+    saveChatCache(chatCache);
+  },
+
+  // Clear conversation for a specific note
+  clearConversation: (noteId: string) => {
+    delete chatCache[noteId];
+    saveChatCache(chatCache);
+  },
+
+  // Clear all conversations
+  clearAllConversations: () => {
+    Object.keys(chatCache).forEach(key => delete chatCache[key]);
+    saveChatCache(chatCache);
+  },
+
+  // Get all cached note IDs
+  getCachedNoteIds: (): string[] => {
+    return Object.keys(chatCache);
+  },
+
+  // Export chat cache
+  exportChatCache: () => {
+    return JSON.stringify(chatCache, null, 2);
+  },
+
+  // Import chat cache
+  importChatCache: (cacheData: string) => {
+    try {
+      const importedCache = JSON.parse(cacheData);
+      Object.assign(chatCache, importedCache);
+      saveChatCache(chatCache);
+      return true;
+    } catch (error) {
+      console.error('Failed to import chat cache:', error);
+      return false;
+    }
+  },
+
+  // Get cache statistics
+  getCacheStats: () => {
+    const noteIds = Object.keys(chatCache);
+    const totalMessages = noteIds.reduce((total, noteId) => {
+      return total + (chatCache[noteId]?.length || 0);
+    }, 0);
+
+    return {
+      totalNotes: noteIds.length,
+      totalMessages,
+      averageMessagesPerNote: noteIds.length > 0 ? Math.round(totalMessages / noteIds.length) : 0
+    };
+  }
+};
+
+// Animated typing indicator component
+const TypingIndicator: React.FC = () => {
+  const [dots, setDots] = useState(0);
+  const [showCursor, setShowCursor] = useState(true);
+
+  useEffect(() => {
+    const dotsInterval = setInterval(() => {
+      setDots(prev => (prev + 1) % 4);
+    }, 500);
+
+    const cursorInterval = setInterval(() => {
+      setShowCursor(prev => !prev);
+    }, 600);
+
+    return () => {
+      clearInterval(dotsInterval);
+      clearInterval(cursorInterval);
+    };
+  }, []);
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1">
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+        <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="text-gray-600 dark:text-gray-400 font-medium">
+          Sophia is thinking{'.'.repeat(dots)}
+        </span>
+        <span
+          className={`w-0.5 h-4 bg-blue-500 transition-opacity duration-200 ${showCursor ? 'opacity-100' : 'opacity-0'
+            }`}
+        ></span>
+      </div>
+      <Sparkles className="w-4 h-4 text-blue-500 animate-pulse" />
+    </div>
+  );
+};
+
+/**
+ * NoteChatWidget - AI-powered chat interface for notes with persistent message caching
+ * 
+ * Features:
+ * - RAG-powered chat using note content
+ * - Persistent message caching across tab navigation
+ * - Automatic embedding of notes when needed
+ * - Animated typing indicators
+ * - Message timestamps
+ * - Cache management utilities
+ * 
+ * Cache Behavior:
+ * - Messages are automatically cached per note ID
+ * - Cache persists across browser sessions via localStorage
+ * - Cache is loaded when switching between notes
+ * - Cache is saved after each message
+ * - Users can clear individual note chats or all chats
+ */
 const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) => {
-  const [query, setQuery] = useState("");
   const [conversation, setConversation] = useState<ChatMessage[]>([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isEmbedded, setIsEmbedded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Load conversation from cache when note changes
   useEffect(() => {
-    // Scroll to bottom when conversation changes
+    if (note?.id) {
+      const cachedConversation = chatCacheUtils.getConversation(note.id);
+      setConversation(cachedConversation);
+    } else {
+      setConversation([]);
+    }
+  }, [note?.id]);
+
+  // Save conversation to cache whenever it changes
+  useEffect(() => {
+    if (note?.id && conversation.length > 0) {
+      chatCacheUtils.setConversation(note.id, conversation);
+    }
+  }, [conversation, note?.id]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [conversation, loading]);
 
-  useEffect(() => {
-    // Reset chat if note changes
-    setConversation([]);
-    setIsEmbedded(false);
-    setError(null);
-    setQuery("");
-  }, [note?.id]);
-
   const handleSend = async () => {
     if (!query.trim() || !note) return;
-    setLoading(true);
-    setError(null);
-    // Add user message
-    setConversation((prev) => [...prev, { sender: "user", text: query }]);
-    const userQuery = query;
+
+    const userQuery = query.trim();
     setQuery("");
+    setError(null);
+
+    // Add timestamp to messages
+    const userMessage: ChatMessage = {
+      sender: "user",
+      text: userQuery,
+      timestamp: Date.now()
+    };
+
+    setConversation((prev) => [...prev, userMessage]);
+    setLoading(true);
+
     try {
-      // 1. Embed if not already embedded
+      // 1. First, ensure the note is embedded
       if (!isEmbedded) {
-        const embedRes = await fetch('/api/embed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const embedRes = await fetch("/api/embed", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             blocks: note.blocks,
             note_id: note.id,
@@ -64,7 +241,12 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
       const res = await fetch("/api/rag/note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note_id: note.id, query: userQuery, allBlocks: note.blocks }),
+        body: JSON.stringify({
+          note_id: note.id,
+          query: userQuery,
+          allBlocks: note.blocks,
+          folder_id: note.folderId
+        }),
       });
       const text = await res.text();
       let data;
@@ -76,18 +258,36 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
       if (!res.ok) {
         throw new Error(data.error || "Unknown error");
       }
-      setConversation((prev) => [
-        ...prev,
-        { sender: "ai", text: data.answer || "(No answer)" }
-      ]);
+
+      // Add timestamp to AI response
+      const aiMessage: ChatMessage = {
+        sender: "ai",
+        text: data.answer || "(No answer)",
+        timestamp: Date.now()
+      };
+
+      setConversation((prev) => [...prev, aiMessage]);
     } catch (e: any) {
       setError(e.message || "Failed to fetch results");
-      setConversation((prev) => [
-        ...prev,
-        { sender: "ai", text: `Error: ${e.message || "Failed to fetch results"}` }
-      ]);
+
+      // Add error message with timestamp
+      const errorMessage: ChatMessage = {
+        sender: "ai",
+        text: `Error: ${e.message || "Failed to fetch results"}`,
+        timestamp: Date.now()
+      };
+
+      setConversation((prev) => [...prev, errorMessage]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Clear chat for current note
+  const clearChat = () => {
+    if (note?.id) {
+      setConversation([]);
+      chatCacheUtils.clearConversation(note.id);
     }
   };
 
@@ -152,6 +352,35 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
             <span className="text-gray-500 text-sm">test score</span>
           </div>
         )}
+        {/* Chat Controls */}
+        <div className="ml-auto flex items-center gap-2">
+          {(() => {
+            const stats = chatCacheUtils.getCacheStats();
+            return (
+              <>
+                {conversation.length > 0 && (
+                  <>
+                    <span className="text-xs text-gray-400">
+                      {conversation.length} message{conversation.length !== 1 ? 's' : ''} cached
+                    </span>
+                    <button
+                      onClick={clearChat}
+                      className="text-xs text-gray-500 hover:text-red-500 transition-colors px-2 py-1 rounded"
+                      title="Clear chat history"
+                    >
+                      Clear Chat
+                    </button>
+                  </>
+                )}
+                {stats.totalNotes > 1 && (
+                  <span className="text-xs text-blue-500" title={`${stats.totalNotes} notes with cached conversations`}>
+                    {stats.totalNotes} notes cached
+                  </span>
+                )}
+              </>
+            );
+          })()}
+        </div>
       </div>
       <div className="w-full bg-white dark:bg-gray-900 rounded-2xl shadow-lg flex flex-col h-[80vh] border border-gray-200 dark:border-gray-800 px-0 md:px-8">
         <h2 className="text-2xl font-bold mb-2 p-4 border-b border-gray-200 dark:border-gray-800">{note.title}</h2>
@@ -179,9 +408,9 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
             </div>
           ))}
           {loading && (
-            <div className="flex justify-start">
-              <div className="rounded-2xl px-5 py-3 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 shadow-md text-base border border-gray-200 dark:border-gray-700 animate-pulse">
-                AI is typing...
+            <div className="flex justify-start animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+              <div className="rounded-2xl px-5 py-3 bg-gradient-to-r from-gray-100 to-blue-50 dark:from-gray-800 dark:to-blue-900/20 text-gray-900 dark:text-gray-100 shadow-md text-base border border-gray-200 dark:border-gray-700 animate-pulse">
+                <TypingIndicator />
               </div>
             </div>
           )}
