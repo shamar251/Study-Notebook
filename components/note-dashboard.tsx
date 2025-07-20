@@ -388,7 +388,7 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
 
         <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4 hide-scrollbar" style={{ minHeight: 0 }}>
           {conversation.length === 0 && (
-            <div className="text-gray-400 text-base text-center">Start the conversation by asking a question about this note!</div>
+            <div className="text-gray-400 text-base text-center">Start the conversation by asking Sophia about this note!</div>
           )}
           {conversation.map((msg, idx) => (
             <div
@@ -422,7 +422,7 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
             type="text"
             value={query}
             onChange={e => setQuery(e.target.value)}
-            placeholder="Ask a question about this note..."
+            placeholder="Ask Sophia about this note..."
             onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
             disabled={loading}
             style={{ minWidth: 0 }}

@@ -738,7 +738,7 @@ export default function Sidebar({
             {/* <div
               className={`h-7 w-7 flex items-center justify-center mb-2 rounded-full cursor-pointer hover:bg-accent/20 transition-colors duration-150 ${showDashboard ? 'bg-accent/30 text-accent-foreground' : 'text-muted-foreground'}`}
               onClick={onDashboardClick}
-              title="Dashboard"
+                                  title="Sophia"
             >
               <Home className="w-5 h-5 mb-1.5" />
             </div> */}
@@ -943,7 +943,7 @@ export default function Sidebar({
                   className="flex items-center gap-2 px-2 py-1 text-sm font-normal rounded-md cursor-pointer hover:bg-accent/20"
                   onClick={onDashboardClick}
                 >
-                  <Home className="w-4 h-4" /> Dashboard
+                  <Home className="w-4 h-4" /> Sophia
                 </div> */}
               </div>
 

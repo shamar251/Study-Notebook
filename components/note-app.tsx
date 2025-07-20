@@ -413,7 +413,7 @@ export default function NoteApp() {
     }
   };
 
-  const goToDashboard = () => {
+  const goToSophia = () => {
     setActiveNote(null)
     setShowStudyModeSelector(false)
   }
@@ -839,7 +839,7 @@ export default function NoteApp() {
           }}
           createFolder={createFolderHandler}
           deleteNote={deleteNoteHandler}
-          onDashboardClick={goToDashboard}
+          onDashboardClick={goToSophia}
           deleteFolder={deleteFolderHandler}
           deselectNote={deselectNote}
           renameFolder={renameFolderHandler}
@@ -867,7 +867,10 @@ export default function NoteApp() {
               >
                 <div className="flex items-center justify-between px-4 py-2 border-b">
                   <TabsList>
-                    <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+                    <TabsTrigger value="dashboard" className="flex items-center gap-2">
+                      <img src="/Sophia.ico" alt="Sophia" className="w-4 h-4" />
+                      Sophia
+                    </TabsTrigger>
                     <TabsTrigger value="view">View Mode</TabsTrigger>
                     <TabsTrigger value="editor">Editor</TabsTrigger>
                     <TabsTrigger value="flashcards">Flashcards</TabsTrigger>
@@ -904,7 +907,6 @@ export default function NoteApp() {
                 <TabsContent value="dashboard" className="flex-1 p-0 m-0 h-full overflow-hidden">
                   <NoteDashboard
                     note={activeNote}
-                    folderName={folders.find(f => f.id === activeNote.folderId)?.name}
                     testSession={noteTestSession}
                   />
                 </TabsContent>
