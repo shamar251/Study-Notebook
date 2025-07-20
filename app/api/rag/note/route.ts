@@ -48,6 +48,231 @@ function groupBlocksByEntity(blocks: Block[]): { entityId: string, combinedConte
   }));
 }
 
+// Helper to gather content from a block and all its direct connections (recursively, bidirectional, no cycles)
+function gatherConnectedContentBidirectional(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
+  if (!block || visited.has(block.id)) return '';
+  visited.add(block.id);
+  let content = block.content || '';
+  // Forward connections
+  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
+    for (const linkedId of block.linkedBlockIds) {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
+      if (linkedBlock && linkedBlock.content) {
+        content += '\n' + `[${linkedBlock.type}] ${linkedBlock.content}`;
+        content += gatherConnectedContentBidirectional(linkedBlock, allBlocks, visited);
+      }
+    }
+  }
+  // Backward connections
+  for (const other of allBlocks) {
+    if (other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && !visited.has(other.id)) {
+      content += '\n' + `[${other.type}] ${other.content}`;
+      content += gatherConnectedContentBidirectional(other, allBlocks, visited);
+    }
+  }
+  return content;
+}
+
+// Helper to gather and group connected content by type for a block (no repeats)
+function gatherGroupedConnectedContent(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
+  if (!block || visited.has(block.id)) return '';
+  visited.add(block.id);
+  let line = `[${block.type}] ${block.content || ''}`;
+  // Collect directly connected blocks by type
+  const connected: Record<string, Set<string>> = {};
+  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
+    for (const linkedId of block.linkedBlockIds) {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
+      if (linkedBlock && !visited.has(linkedBlock.id)) {
+        if (!connected[linkedBlock.type]) connected[linkedBlock.type] = new Set();
+        connected[linkedBlock.type].add(linkedBlock.content || '');
+      }
+    }
+  }
+  // Backward connections
+  for (const other of allBlocks) {
+    if (other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && !visited.has(other.id)) {
+      if (!connected[other.type]) connected[other.type] = new Set();
+      connected[other.type].add(other.content || '');
+    }
+  }
+  // Append grouped connected content (deduplicated)
+  for (const type of Object.keys(connected)) {
+    for (const content of connected[type]) {
+      if (content && content.trim().length > 0) {
+        line += ` [${type}] ${content}`;
+      }
+    }
+  }
+  return line;
+}
+
+// Helper to gather and group connected content by type for a block (no repeats, inline [when])
+function gatherGroupedConnectedContentInlineWhen(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
+  if (!block || visited.has(block.id)) return '';
+  visited.add(block.id);
+  let line = `[${block.type}] ${block.content || ''}`;
+  // Inline [when] blocks directly connected
+  let inlinedWhen = '';
+  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
+    for (const linkedId of block.linkedBlockIds) {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
+      if (linkedBlock && linkedBlock.type === 'when' && linkedBlock.content && !visited.has(linkedBlock.id)) {
+        inlinedWhen += ` [when] ${linkedBlock.content}`;
+        visited.add(linkedBlock.id);
+      }
+    }
+  }
+  // Backward inline [when]
+  for (const other of allBlocks) {
+    if (other.type === 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
+      inlinedWhen += ` [when] ${other.content}`;
+      visited.add(other.id);
+    }
+  }
+  // Collect other directly connected blocks by type (excluding [when])
+  const connected: Record<string, Set<string>> = {};
+  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
+    for (const linkedId of block.linkedBlockIds) {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
+      if (linkedBlock && linkedBlock.type !== 'when' && !visited.has(linkedBlock.id)) {
+        if (!connected[linkedBlock.type]) connected[linkedBlock.type] = new Set();
+        connected[linkedBlock.type].add(linkedBlock.content || '');
+      }
+    }
+  }
+  // Backward for other types
+  for (const other of allBlocks) {
+    if (other.type !== 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
+      if (!connected[other.type]) connected[other.type] = new Set();
+      connected[other.type].add(other.content || '');
+    }
+  }
+  // Append grouped connected content (deduplicated, excluding [when])
+  for (const type of Object.keys(connected)) {
+    for (const content of connected[type]) {
+      if (content && content.trim().length > 0) {
+        line += ` [${type}] ${content}`;
+      }
+    }
+  }
+  line += inlinedWhen;
+  return line;
+}
+
+// Helper to gather and group connected content by type for a block (no repeats, inline [when] as natural language)
+function gatherGroupedConnectedContentInlineWhenNatural(block: Block, allBlocks: Block[], visited = new Set<string>()): string {
+  if (!block || visited.has(block.id)) return '';
+  visited.add(block.id);
+  let line = `[${block.type}] ${block.content || ''}`;
+  // Inline [when] blocks directly connected, as natural language
+  let whenPhrase = '';
+  let whenTimes: string[] = [];
+  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
+    for (const linkedId of block.linkedBlockIds) {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
+      if (linkedBlock && linkedBlock.type === 'when' && linkedBlock.content && !visited.has(linkedBlock.id)) {
+        whenTimes.push(linkedBlock.content);
+        visited.add(linkedBlock.id);
+      }
+    }
+  }
+  // Backward inline [when]
+  for (const other of allBlocks) {
+    if (other.type === 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
+      whenTimes.push(other.content);
+      visited.add(other.id);
+    }
+  }
+  if (whenTimes.length === 1) {
+    whenPhrase = ` at ${whenTimes[0]}`;
+  } else if (whenTimes.length > 1) {
+    whenPhrase = ` at ${whenTimes.join(' or ')}`;
+  }
+  // Collect other directly connected blocks by type (excluding [when])
+  const connected: Record<string, Set<string>> = {};
+  if (block.linkedBlockIds && block.linkedBlockIds.length > 0) {
+    for (const linkedId of block.linkedBlockIds) {
+      const linkedBlock = allBlocks.find((b: Block) => b.id === linkedId);
+      if (linkedBlock && linkedBlock.type !== 'when' && !visited.has(linkedBlock.id)) {
+        if (!connected[linkedBlock.type]) connected[linkedBlock.type] = new Set();
+        connected[linkedBlock.type].add(linkedBlock.content || '');
+      }
+    }
+  }
+  // Backward for other types
+  for (const other of allBlocks) {
+    if (other.type !== 'when' && other.linkedBlockIds && other.linkedBlockIds.includes(block.id) && other.content && !visited.has(other.id)) {
+      if (!connected[other.type]) connected[other.type] = new Set();
+      connected[other.type].add(other.content || '');
+    }
+  }
+  // Append grouped connected content (deduplicated, excluding [when])
+  for (const type of Object.keys(connected)) {
+    for (const content of connected[type]) {
+      if (content && content.trim().length > 0) {
+        line += ` [${type}] ${content}`;
+      }
+    }
+  }
+  line += whenPhrase;
+  return line;
+}
+
+// --- NEW: Block-to-fact mapping for all block types ---
+function blockToFactLine(block: Block, allBlocks: Block[]): string {
+  switch (block.type) {
+    case 'who':
+      return `Entity: ${block.content || 'Unknown'} | Description/Action/Definition: ` +
+        (block.linkedBlockIds && block.linkedBlockIds.length > 0
+          ? block.linkedBlockIds.map(id => {
+            const linked = allBlocks.find(b => b.id === id);
+            return linked && linked.content ? linked.content : '';
+          }).filter(Boolean).join('; ')
+          : '');
+    case 'what':
+      return `Entity: ${block.content || 'Unknown'} | Description/Action/Definition: ` +
+        (block.linkedBlockIds && block.linkedBlockIds.length > 0
+          ? block.linkedBlockIds.map(id => {
+            const linked = allBlocks.find(b => b.id === id);
+            return linked && linked.content ? linked.content : '';
+          }).filter(Boolean).join('; ')
+          : '');
+    case 'when':
+      return `Time: ${block.content || 'Unknown'} | Event: ` +
+        (block.linkedBlockIds && block.linkedBlockIds.length > 0
+          ? block.linkedBlockIds.map(id => {
+            const linked = allBlocks.find(b => b.id === id);
+            return linked && linked.content ? linked.content : '';
+          }).filter(Boolean).join('; ')
+          : '');
+    case 'where':
+      return `Place: ${block.content || 'Unknown'} | Event: ` +
+        (block.linkedBlockIds && block.linkedBlockIds.length > 0
+          ? block.linkedBlockIds.map(id => {
+            const linked = allBlocks.find(b => b.id === id);
+            return linked && linked.content ? linked.content : '';
+          }).filter(Boolean).join('; ')
+          : '');
+    case 'why':
+      return `Reason: ${block.content || ''}`;
+    case 'how':
+      return `Method: ${block.content || ''}`;
+    case 'image':
+      return `Media: Image | Description: ${block.content || ''}`;
+    case 'video':
+      return `Media: Video | Description: ${block.content || ''}`;
+    case 'code':
+      return `Code: ${block.content || ''}`;
+    case 'note':
+      return `Note: ${block.content || ''}`;
+    case 'check':
+      return `Check: ${block.content || ''}`;
+    default:
+      return `${block.type}: ${block.content || ''}`;
+  }
+}
+
 export async function POST(req: NextRequest) {
   const { note_id, query, topK = 10, allBlocks } = await req.json();
   if (!note_id || !query || !allBlocks) {
@@ -64,9 +289,19 @@ export async function POST(req: NextRequest) {
   let allResults: any[] = [];
   for (const altQuery of altQueries) {
     const queryEmbedding = await getEmbedding(altQuery);
+    if (!queryEmbedding || !Array.isArray(queryEmbedding) || queryEmbedding.length !== 768) {
+      throw new Error('Embedding failed or returned wrong dimension (expected 768).');
+    }
     // For each entity, embed the combined content and search Qdrant
     for (const entity of entities) {
+      if (!entity.combinedContent || entity.combinedContent.trim().length === 0) {
+        console.warn('Skipping entity with empty combinedContent:', entity.entityId);
+        continue;
+      }
       const entityEmbedding = await getEmbedding(entity.combinedContent);
+      if (!entityEmbedding || !Array.isArray(entityEmbedding) || entityEmbedding.length !== 768) {
+        throw new Error('Entity embedding failed or returned wrong dimension (expected 768).');
+      }
       const filter = { must: [{ key: 'note_id', match: { value: note_id } }] };
       const results = await searchQdrant({ queryEmbedding: entityEmbedding, filter, topK: 10 });
       console.log('Qdrant raw results:', results); // DEBUG: log raw Qdrant results
@@ -85,43 +320,24 @@ export async function POST(req: NextRequest) {
 
   // After deduplication, log the deduped results
   console.log('Deduped results:', dedupedResults);
+  // Log all block types included in the context
+  const blockTypesInContext = dedupedResults.map(r => r.payload?.type).filter(Boolean);
+  console.log('Block types in context:', blockTypesInContext);
 
-  let context = '';
-  let prompt = '';
+  // --- NEW: Build LLM-friendly context using blockToFactLine ---
+  const instructions = `Instructions:\n- Each line below is a fact, with the format depending on the type of information (Entity, Time, Place, Reason, Method, Media, Check, etc.).\n- Use these facts to answer the question.\n- Do not repeat identical facts or answers.\n- If you can infer a likely time, place, or connection, state your reasoning.\n`;
+
+  // Use all deduped results' blockIds to build the context
+  const factLines = dedupedResults
+    .map(r => r.payload && r.payload.blockId
+      ? blockToFactLine(allBlocks.find((b: Block) => b.id === r.payload.blockId) as Block, allBlocks)
+      : `${r.payload?.type}: ${r.payload?.content || ''}`)
+    .filter(Boolean);
+  const context = `${instructions}\nFacts:\n${factLines.join('\n')}\n`;
+
+  const prompt = `You are a helpful study assistant. Use ONLY the following note data to answer the user's question. If the answer is not in the context, say "I don't know."\n\n${context}\nQuestion: ${query}\nAnswer:`;
+
   let answer = '';
-
-  if (isSummarizationQuery(query)) {
-    // Summarization: use all chunks for this note, regardless of score
-    const allChunks = dedupedResults
-      .map(r => {
-        const meta = r.payload ? `[${r.payload.position ?? ''} ${r.payload.type ?? ''}]` : '';
-        return `${meta} ${r.payload?.content || ''}`;
-      })
-      .filter(Boolean);
-    context = allChunks.join('\n---\n');
-    prompt = `You are a helpful assistant summarizing a user's notes. Based on the following notes, generate a concise summary of the main ideas.\n\nNotes:\n${context}`;
-  } else {
-    // Q&A: use only chunks with high similarity
-    let relevantChunks = dedupedResults
-      .filter(r => typeof r.score === 'number' && r.score > 0.5)
-      .map(r => {
-        const meta = r.payload ? `[${r.payload.position ?? ''} ${r.payload.type ?? ''}]` : '';
-        return `${meta} ${r.payload?.content || ''}`;
-      })
-      .filter(Boolean);
-    // Fallback: if context is empty, use all deduped results' content
-    if (relevantChunks.length === 0) {
-      relevantChunks = dedupedResults
-        .map(r => {
-          const meta = r.payload ? `[${r.payload.position ?? ''} ${r.payload.type ?? ''}]` : '';
-          return `${meta} ${r.payload?.content || ''}`;
-        })
-        .filter(Boolean);
-    }
-    context = relevantChunks.join('\n---\n');
-    prompt = `You are a helpful study assistant. Use ONLY the following note data to answer the user's question. If the answer is not in the context, say "I don't know."\n\nContext:\n${context}\n\nQuestion: ${query}\nAnswer:`;
-  }
-
   // Before sending to Ollama, log the context
   console.log('[RAG] Final context for Ollama:', context);
 

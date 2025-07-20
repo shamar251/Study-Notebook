@@ -12,6 +12,9 @@
 - [x] Implement semantic chunking and embedding of connected blocks (WHO+WHAT)
 - [ ] Optimize note chunking and embedding for semantically structured, context-aware blocks
 - [ ] Optimize backend for speed (reduce latency in embedding, search, and chat response)
+- [x] Add Qdrant indexes for block type and blockId fields for fast semantic filtering
+- [ ] Ensure all note embeddings/indexing POST the blocks array (not just content) to /api/embed
+- [ ] Update embedding logic to always include type, blockId, and linkedBlocks in the payload for semantic structure
 
 ## Frontend
 - [x] Scaffold NoteChat widget: Replace DashBoard section in editor.tsx to be note chat.
