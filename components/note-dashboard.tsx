@@ -1,107 +1,124 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import TimeSince from "./TimeSince";
-import { FileText, Layers, ListChecks, GraduationCap } from "lucide-react";
+import React, { useState } from "react";
 import type { Note } from "@/components/note-app";
-import React from "react";
 
-interface NoteDashboardProps {
-  note: Note;
-  folderName?: string;
-  testSession?: { score?: number; createdAt?: number };
-  quizSession?: { score?: number; createdAt?: number };
+interface NoteChatWidgetProps {
+  note?: Note;
 }
 
-function countStudyPairs(note: Note): number {
-  let count = 0;
-  const blocks = note.blocks;
-  blocks.forEach((block, idx) => {
-    if (block.type === "who") {
-      // New structure: linkedBlockIds
-      if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-        const whatBlock = blocks.find((b) => b.id === block.linkedBlockIds![0] && b.type === "what");
-        if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "") {
-          count++;
+const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note }) => {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isEmbedded, setIsEmbedded] = useState(false);
+  const [answer, setAnswer] = useState<string | null>(null);
+
+  const handleSend = async () => {
+    if (!query.trim() || !note) return;
+    setLoading(true);
+    setError(null);
+    setResults([]);
+    setAnswer(null);
+    try {
+      // 1. Embed if not already embedded
+      if (!isEmbedded) {
+        const content = (note.blocks || []).map(b => b.content || '').join('\n');
+        const embedRes = await fetch('/api/embed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            note_id: note.id,
+            folder_id: note.folderId
+          })
+        });
+        if (!embedRes.ok) {
+          setError('Failed to embed note for RAG.');
+          setLoading(false);
+          return;
         }
-      } else {
-        // Old structure: adjacent WHAT block
-        if (idx < blocks.length - 1) {
-          const nextBlock = blocks[idx + 1];
-          if (nextBlock.type === "what" && nextBlock.content && nextBlock.content.trim() !== "") {
-            count++;
-          }
-        }
+        setIsEmbedded(true);
       }
+      // 2. Now run the RAG search as before
+      const res = await fetch("/api/rag/note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note_id: note.id, query, allBlocks: note.blocks }),
+      });
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        throw new Error(`Non-JSON response: ${text.slice(0, 100)}`);
+      }
+      if (!res.ok) {
+        throw new Error(data.error || "Unknown error");
+      }
+      setResults(data.results || []);
+      setAnswer(data.answer || null);
+    } catch (e: any) {
+      setError(e.message || "Failed to fetch results");
+    } finally {
+      setLoading(false);
     }
-  });
-  return count;
-}
+  };
 
-function getStudyProgress(note: Note): number {
-  if (!note.studyStats) return 0;
-  const { quizAttempts = 0, quizCorrect = 0 } = note.studyStats;
-  if (quizAttempts === 0) return 0;
-  return Math.round((quizCorrect / quizAttempts) * 100);
-}
+  if (!note) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full w-full p-4">
+        <div className="w-full max-w-xl mx-auto bg-white dark:bg-gray-900 rounded shadow p-6">
+          <h2 className="text-xl font-bold mb-2">Note Chat (RAG)</h2>
+          <div className="text-red-600">No note selected. Please select a note to chat.</div>
+        </div>
+      </div>
+    );
+  }
 
-const NoteDashboard: React.FC<NoteDashboardProps> = ({ note, folderName, testSession, quizSession }) => {
   return (
-    <div className="flex justify-center items-center h-full w-full">
-      <Card className="w-full max-w-xl mx-auto mt-8">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-black" />
-            {note.title}
-          </CardTitle>
-          <CardDescription>
-            {folderName && <span className="mr-2">Folder: {folderName}</span>}
-            <span>Last updated: <TimeSince timestamp={note.updatedAt} /></span>
-            {note.lastStudied && (
-              <span className="ml-2">Last studied: <TimeSince timestamp={note.lastStudied} /></span>
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {note.tags && note.tags.length > 0 ? (
-              note.tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="text-xs px-2 py-0.5">{tag}</Badge>
-              ))
-            ) : (
-              <Badge variant="secondary" className="text-xs px-2 py-0.5">No tags</Badge>
-            )}
+    <div className="flex flex-col items-center justify-center h-full w-full p-4">
+      <div className="w-full max-w-xl mx-auto bg-white dark:bg-gray-900 rounded shadow p-6">
+        <h2 className="text-xl font-bold mb-2">{note.title}</h2>
+        <div className="flex gap-2 mb-4">
+          <input
+            className="flex-1 border rounded px-2 py-1"
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Ask a question about this note..."
+            onKeyDown={e => { if (e.key === 'Enter') handleSend(); }}
+            disabled={loading}
+          />
+          <button
+            className="bg-blue-600 text-white px-4 py-1 rounded disabled:opacity-50"
+            onClick={handleSend}
+            disabled={loading || !query.trim()}
+          >
+            {loading ? "..." : "Send"}
+          </button>
+        </div>
+        {error && <div className="text-red-600 mb-2">{error}</div>}
+        {/* Show the LLM answer */}
+        {answer && (
+          <div className="border rounded p-2 bg-blue-50 dark:bg-blue-900 text-black dark:text-white mb-2">
+            <strong>AI:</strong> {answer}
           </div>
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <div className="flex flex-col items-center">
-              <Layers className="w-6 h-6 mb-1 text-blue-600" />
-              <span className="font-semibold text-lg">{countStudyPairs(note)}</span>
-              <span className="text-xs text-gray-500">Study Items</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <ListChecks className="w-6 h-6 mb-1 text-green-600" />
-              <span className="font-semibold text-lg">{note.studyStats?.quizAttempts ?? 0}</span>
-              <span className="text-xs text-gray-500">Quiz Attempts</span>
-              <span className="text-xs text-green-700">Score: {getStudyProgress(note)}%</span>
-            </div>
-            <div className="flex flex-col items-center">
-              <GraduationCap className="w-6 h-6 mb-1 text-yellow-600" />
-              <span className="font-semibold text-lg">{testSession?.score !== undefined ? `${testSession.score}%` : "-"}</span>
-              <span className="text-xs text-gray-500">Test Score</span>
-              {testSession?.createdAt && (
-                <span className="text-xs text-gray-400">{new Date(testSession.createdAt).toLocaleDateString()}</span>
-              )}
-            </div>
-            <div className="flex flex-col items-center">
-              <Layers className="w-6 h-6 mb-1 text-purple-600" />
-              <span className="font-semibold text-lg">{note.studyStats?.flashcardReviews ?? 0}</span>
-              <span className="text-xs text-gray-500">Flashcard Reviews</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        )}
+        {/* Remove raw results from UI */}
+        {/* <div className="space-y-2">
+          {results.length > 0 ? (
+            results.map((item, idx) => (
+              <div key={idx} className="border rounded p-2 bg-gray-50 dark:bg-gray-800">
+                <pre className="whitespace-pre-wrap break-words text-sm">{item.payload?.content || JSON.stringify(item)}</pre>
+              </div>
+            ))
+          ) : (
+            <div className="text-gray-400 text-sm">No results yet. Try asking a question!</div>
+          )}
+        </div> */}
+      </div>
     </div>
   );
 };
 
-export default NoteDashboard; 
+export default NoteChatWidget; 

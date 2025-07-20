@@ -21,6 +21,7 @@ import {
   RotateCcw,
   User, // Add User icon for profile button
   ChevronLeft, // For collapse button
+  Bot, // Add Bot icon for semantic agents
 } from "lucide-react"
 import {
   DndContext,
@@ -71,6 +72,7 @@ import SettingsDialog from './SettingsDialog'
 import { useTheme } from 'next-themes'
 import { ResizableBox } from 'react-resizable';
 import 'react-resizable/css/styles.css';
+import Link from "next/link"
 
 interface SidebarProps {
   folders: Folder[]
@@ -99,6 +101,7 @@ interface SidebarProps {
   restoreItem: (itemId: string, itemType: 'folder' | 'note') => void
   permanentDeleteItem: (itemId: string, itemType: 'folder' | 'note') => void
   toggleFavorite: (itemId: string, itemType: 'folder' | 'note') => void
+  onSemanticAgentsClick: () => void // <-- add this
 }
 
 // Custom alphanumeric sort: numbers first, then letters (case-insensitive)
@@ -140,6 +143,7 @@ export default function Sidebar({
   restoreItem,
   permanentDeleteItem,
   toggleFavorite,
+  onSemanticAgentsClick,
 }: SidebarProps) {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     root: true,
@@ -719,6 +723,17 @@ export default function Sidebar({
             >
               {collapsed ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
             </div>
+            {/* Semantic Agents button */}
+            <button
+              className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground mt-1"
+              title="Semantic Agents"
+              aria-label="Semantic Agents"
+              type="button"
+              style={{ background: 'none', border: 'none', padding: 0 }}
+              onClick={onSemanticAgentsClick}
+            >
+              <Bot className="h-6 w-6 ml-1" />
+            </button>
             {/* Home/Dashboard button */}
             {/* <div
               className={`h-7 w-7 flex items-center justify-center mb-2 rounded-full cursor-pointer hover:bg-accent/20 transition-colors duration-150 ${showDashboard ? 'bg-accent/30 text-accent-foreground' : 'text-muted-foreground'}`}

@@ -49,6 +49,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
   const [isScrolling, setIsScrolling] = useState(false)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  const [dirtyBlockIds, setDirtyBlockIds] = useState<Set<string>>(new Set());
 
   // Connection highlighting state
   const [highlightedBlockId, setHighlightedBlockId] = useState<string | null>(null)
@@ -118,23 +119,61 @@ export default function Editor({ note, updateNote }: EditorProps) {
   // Create a ref to store the timeout ID
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Wrap setBlocks to track dirty blocks
+  const setBlocksAndDirty = useCallback((updater: ((prevBlocks: Block[]) => Block[]) | Block[]) => {
+    setBlocks((prevBlocks: Block[]) => {
+      const nextBlocks = typeof updater === 'function' ? (updater as (prevBlocks: Block[]) => Block[])(prevBlocks) : updater;
+      // Find changed/added blocks
+      const prevMap = new Map(prevBlocks.map((b: Block) => [b.id, b]));
+      const nextMap = new Map(nextBlocks.map((b: Block) => [b.id, b]));
+      const dirty = new Set(dirtyBlockIds);
+      for (const block of nextBlocks) {
+        const prev = prevMap.get(block.id);
+        if (!prev || JSON.stringify(prev) !== JSON.stringify(block)) {
+          dirty.add(block.id);
+        }
+      }
+      // Also add deleted blocks (if needed for deletion upsert)
+      // for (const id of prevMap.keys()) {
+      //   if (!nextMap.has(id)) dirty.add(id);
+      // }
+      setDirtyBlockIds(dirty);
+      return nextBlocks;
+    });
+  }, [dirtyBlockIds]);
+
   // Function to save changes with debounce
-  const debouncedSave = useCallback(() => {
-    // Clear any existing timeout
+  const debouncedSave = useCallback(async () => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
-
-    // Set a new timeout with a longer delay
-    saveTimeoutRef.current = setTimeout(() => {
+    saveTimeoutRef.current = setTimeout(async () => {
       updateNote({
         ...note,
         title,
         blocks,
         tags,
       });
-    }, 1000); // Increased to 1000ms (1 second) debounce
-  }, [note, title, blocks, tags, updateNote]);
+      // --- Embed and upsert to Qdrant ---
+      if (blocks.length > 0 && dirtyBlockIds.size > 0) {
+        try {
+          const dirtyBlocks = blocks.filter(b => dirtyBlockIds.has(b.id));
+          await fetch('/api/embed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              blocks: dirtyBlocks,
+              note_id: note.id,
+              folder_id: note.folderId
+            })
+          });
+          setDirtyBlockIds(new Set()); // Clear dirty after successful upsert
+        } catch (err) {
+          console.error('Failed to embed/upsert note:', err);
+        }
+      }
+    }, 1000);
+  }, [note, title, blocks, tags, updateNote, dirtyBlockIds]);
 
   // Auto-save when content changes
   useEffect(() => {
@@ -168,7 +207,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
           if (!base64Data) return
 
           if (blockId) {
-            setBlocks(blocks.map(block => {
+            setBlocksAndDirty((blocks: Block[]) => blocks.map((block: Block) => {
               if (block.id !== blockId) return block;
               if (block.type === "who" || block.type === "what" || block.type === "note" || block.type === "why") {
                 return { ...block, image: base64Data };
@@ -187,14 +226,14 @@ export default function Editor({ note, updateNote }: EditorProps) {
               lastModified: new Date(),
               sortOrder: blocks.length,
             }
-            setBlocks([...blocks, newBlock])
+            setBlocksAndDirty((blocks: Block[]) => [...blocks, newBlock])
           }
         }
         reader.readAsDataURL(file)
         break
       }
     }
-  }, [blocks])
+  }, [blocks, setBlocksAndDirty])
 
   // Add paste event listener
   useEffect(() => {
@@ -382,7 +421,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
 
   // Handler to replace a where block with a reference to an existing where block
   const handleSelectExistingWhereBlock = useCallback((targetBlockId: string, referenceBlock: Block) => {
-    setBlocks(blocks => blocks.map(b =>
+    setBlocksAndDirty((blocks: Block[]) => blocks.map((b: Block) =>
       b.id === targetBlockId
         ? {
           id: b.id,
@@ -394,7 +433,7 @@ export default function Editor({ note, updateNote }: EditorProps) {
         }
         : b
     ));
-  }, []);
+  }, [setBlocksAndDirty]);
 
   // Debounced scroll handler to prevent excessive re-renders
   const handleScroll = useCallback(() => {

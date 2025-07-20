@@ -28,6 +28,7 @@ import { Select } from "./ui/select"
 import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import NoteDashboard from "@/components/note-dashboard";
+import SemanticFolderAgents from "@/components/semantic-folder-agents"
 
 export type Note = DBNote
 
@@ -40,7 +41,7 @@ export default function NoteApp() {
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
-  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | null>(null);
+  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | "semantic-agents" | null>(null);
   const [showStudyModeSelector, setShowStudyModeSelector] = useState(false);
   const [folderNotes, setFolderNotes] = useState<Note[]>([]);
   const { theme, setTheme } = useTheme();
@@ -854,6 +855,7 @@ export default function NoteApp() {
           restoreItem={handleRestoreItem}
           permanentDeleteItem={handlePermanentDelete}
           toggleFavorite={handleToggleFavorite}
+          onSemanticAgentsClick={() => { setView('semantic-agents'); setActiveNote(null); setShowStudyModeSelector(false); }}
         />
         <main className="flex-1 flex flex-col overflow-hidden">
           {activeNote && !showStudyModeSelector && (
@@ -1097,6 +1099,10 @@ export default function NoteApp() {
               onEditName={handleEditFolderName}
               onNoteClick={openNote}
             />
+          )}
+
+          {view === 'semantic-agents' && (
+            <SemanticFolderAgents />
           )}
         </main>
       </div>
