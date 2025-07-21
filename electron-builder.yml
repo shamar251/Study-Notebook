@@ -11,6 +11,9 @@ files:
     to: electron
   - from: scripts
     to: scripts
+  - from: dist/lib
+    to: dist/lib
+  - server.js
   - package.json
 mac:
   category: public.app-category.education

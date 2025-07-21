@@ -238,7 +238,7 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
         setIsEmbedded(true);
       }
       // 2. Now run the RAG search as before
-      const res = await fetch("/api/rag/note", {
+      const res = await fetch("http://localhost:3001/api/rag", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
