@@ -15,6 +15,8 @@
 - [x] Add Qdrant indexes for block type and blockId fields for fast semantic filtering
 - [x] Ensure all note embeddings/indexing POST the blocks array (not just content) to /api/embed
 - [ ] Update embedding logic to always include type, blockId, and linkedBlocks in the payload for semantic structure
+- [ ] Make RAG chat work in production (critical)
+- [ ] Fix Electron route issue (critical)
 
 ## Frontend
 - [x] Scaffold NoteChat widget: Replace DashBoard section in editor.tsx to be note chat.
