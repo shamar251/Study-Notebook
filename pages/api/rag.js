@@ -182,7 +182,7 @@ export default async function handler(req, res) {
       const url = new URL('http://localhost:11434/api/generate');
       const isHttps = url.protocol === 'https:';
       const reqModule = isHttps ? https : http;
-      const postData = JSON.stringify({ model: 'llama3.1', prompt });
+      const postData = JSON.stringify({ model: 'deepseek-llm:7b', prompt });
       const options = {
         hostname: url.hostname,
         port: url.port || (isHttps ? 443 : 80),

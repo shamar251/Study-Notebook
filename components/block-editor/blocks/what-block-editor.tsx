@@ -26,7 +26,7 @@ export function WhatBlockEditor({
       <div className="flex items-center gap-2 mb-1">
         <div className="w-full min-w-[350px] md:min-w-[500px]">
           <MathInput
-            value={block.content}
+            value={block.content || ''}
             onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
             placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
             isMathMode={block.math}

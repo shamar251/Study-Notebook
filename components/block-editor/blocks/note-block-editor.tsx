@@ -23,7 +23,7 @@ export function NoteBlockEditor({
   return (
     <div>
       <MathInput
-        value={block.content}
+        value={block.content || ''}
         onChange={(value: string) => onUpdateBlock(block.id, value, block.math)}
         placeholder={BLOCK_TYPE_PLACEHOLDERS[block.type]}
         isMathMode={block.math}

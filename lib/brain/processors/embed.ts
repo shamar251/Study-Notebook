@@ -1,5 +1,5 @@
 // OpenAI and Qdrant embedding/search utility (scaffold)
-import axios from 'axios'; // Make sure to install axios: npm install axios @types/axios
+import * as axios from 'axios'; // Make sure to install axios: npm install axios @types/axios
 
 // Embedding provider selection
 const EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER || 'ollama'; // 'ollama' or 'openai'
@@ -131,7 +131,7 @@ export async function upsertQdrantVector({
 export async function searchQdrant({
   queryEmbedding,
   filter,
-  topK = 5,
+  topK = 20,
   collection = 'notes',
 }: {
   queryEmbedding: number[];
