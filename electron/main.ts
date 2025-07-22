@@ -1,6 +1,6 @@
+const path = require('path');
+const fs = require('fs');
 import { app, BrowserWindow, ipcMain, dialog } from "electron"
-import * as path from "path"
-import * as fs from "fs"
 import { spawn, ChildProcess } from 'child_process';
 const serve = require("electron-serve")
 const { runRagPipeline } = require("./lib/ragHandler.js");
