@@ -3,6 +3,7 @@ import * as path from "path"
 import * as fs from "fs"
 import { spawn, ChildProcess } from 'child_process';
 const serve = require("electron-serve")
+const { runRagPipeline } = require("./lib/ragHandler.js");
 
 // Determine if we're in development or production
 const isDev = process.env.NODE_ENV === "development"
@@ -166,5 +167,16 @@ ipcMain.handle('ollama-toggle', async (_event, enabled: boolean) => {
   } else {
     await stopOllama();
     return { running: false };
+  }
+});
+
+ipcMain.handle('rag-query', async (_event, { note_id, query, allBlocks, topK = 10, folder_id }) => {
+  console.log('[Main] rag-query handler received:', query);
+  try {
+    const result = await runRagPipeline({ note_id, query, allBlocks, topK, folder_id });
+    return { success: true, ...result };
+  } catch (error) {
+    console.error('RAG error:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });

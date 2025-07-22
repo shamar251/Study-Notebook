@@ -8,12 +8,13 @@
     "start": "next start",
     "lint": "next lint",
     "build:electron": "tsc -p electron/tsconfig.json",
-    "electron:dev": "npm run build:electron && cross-env NODE_ENV=development electron electron/dist/main.js",
+    "electron:dev": "npm run build:electron && cross-env QDRANT_URL=https://39d385fd-d382-4626-88ff-3e30f74825bc.us-east4-0.gcp.cloud.qdrant.io:6333 QDRANT_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.koHi2gFKW1KyzGSdB4JI3NplNK1em0iIeKDfKdhMjsk NODE_ENV=development electron electron/dist/main.js",
     "electron:build": "next build && npm run build:electron && cross-env NODE_ENV=production electron electron/dist/main.js",
     "package": "next build && npm run build:electron && electron-builder",
     "electron": "npm run electron:dev",
     "build:react": "next build",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "postbuild": "xcopy lib electron\\dist\\lib /E /I /Y"
   },
   "dependencies": {
     "@antv/layout": "^1.2.14-beta.8",
