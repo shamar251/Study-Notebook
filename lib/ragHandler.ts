@@ -26,17 +26,25 @@ type QdrantResult = {
 
 interface RagPipelineArgs {
   note_id: string;
+  noteTitle?: string;
   query: string;
   topK?: number;
   allBlocks: Block[];
   folder_id?: string;
+  model?: string;
+  temperature?: number;
+  top_p?: number;
 }
 
-async function generateAlternativeQueries(question: string, numVariants = 3): Promise<string[]> {
-  const prompt = `You are an AI language model assistant. Your task is to generate ${numVariants} different versions of the given user question to retrieve relevant documents from a vector database. By generating multiple perspectives on the user question, your goal is to help the user overcome some of the limitations of the distance-based similarity search. Provide these alternative questions separated by newlines.\nOriginal question: ${question}`;
+async function generateAlternativeQueries(question: string, numVariants = 3, model: string): Promise<string[]> {
+  if (!model) {
+    console.error('[RAG] No LLM model provided to generateAlternativeQueries.');
+    throw new Error('No LLM model provided. Please select a model in settings.');
+  }
+  const prompt = `You are a helpful AI assistant specialized in semantic search and information retrieval. Your task is to generate ${numVariants} diverse and meaningful rephrasings of the following user question to enhance recall in a vector-based retrieval system.\n\nEach variant should explore a different way of expressing the user's intent—through paraphrasing, clarification, or alternative phrasing—so that the system can retrieve semantically relevant but lexically diverse documents. Avoid simple rewordings; focus on variety in perspective, specificity, and terminology.\n\nReturn the variants as separate lines. Do not include numbering or explanations.\n\nOriginal question: ${question}`;
   try {
     const ollamaRes = await axios.post('http://localhost:11434/api/generate', {
-      model: 'deepseek-llm:7b',
+      model,
       prompt
     });
     const data = ollamaRes.data as any;
@@ -46,7 +54,7 @@ async function generateAlternativeQueries(question: string, numVariants = 3): Pr
   } catch (err) {
     console.error('Failed to generate alternative queries:', err);
   }
-  return [question];
+  return [question]; // fallback to original question
 }
 
 function blockToFactLine(block: Block | undefined, allBlocks: Block[]): string {
@@ -118,7 +126,11 @@ function logToFile(message: any) {
   fs.appendFileSync(logPath, `[${timestamp}] ${msg}\n`, 'utf-8');
 }
 
-export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, folder_id }: RagPipelineArgs): Promise<{ results: QdrantResult[]; answer: string; facts: any[] }> {
+export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, folder_id, model, temperature, top_p, noteTitle }: RagPipelineArgs): Promise<{ results: QdrantResult[]; answer: string; facts: any[] }> {
+  if (!model) {
+    console.error('[RAG] No LLM model provided to runRagPipeline.');
+    throw new Error('No LLM model provided. Please select a model in settings.');
+  }
   // logToFile('[RAG DEBUG] runRagPipeline received allBlocks:');
   if (allBlocks && allBlocks.length > 0) {
     // logToFile('[RAG DEBUG] allBlocks IDs and types:');
@@ -129,7 +141,7 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
 
   // 1. Generate alternative queries
   const t0 = Date.now();
-  const altQueries = await generateAlternativeQueries(query, 3);
+  const altQueries = await generateAlternativeQueries(query, 3, model);
   const t1 = Date.now();
   // logToFile(`[TIMING] generateAlternativeQueries: ${t1 - t0}ms`);
 
@@ -200,6 +212,28 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
     // logToFile(`[RAG WARNING] ${repeatedContentCount} deduped results have repeated payload.content. Check your embedding/chunking pipeline!`);
   }
 
+  // --- HYBRID PARENT/CONTEXTUAL RETRIEVAL ---
+  // 1. Get parent note title and summary (if available)
+  let parentNoteTitle = noteTitle || '';
+  let parentNoteSummary = '';
+  // 2. Build parent context lines (optimized for speed and context window)
+  const MAX_FULL_NOTE_CHARS = 4000;
+  const parentContextLines = [];
+  // Try to find a summary/overview block in allBlocks
+  const summaryBlock = allBlocks.find(b => b.type === 'note' && b.content && /summary|overview|main point/i.test(b.content));
+  if (summaryBlock) parentNoteSummary = summaryBlock.content || '';
+  // Add full note content as a context line, truncated if too long
+  let fullNoteContent = '';
+  if (allBlocks && allBlocks.length > 0) {
+    fullNoteContent = allBlocks.map(b => `${b.type ? `[${b.type}] ` : ''}${b.content || ''}`.trim()).join(' \n ');
+    if (fullNoteContent.length > MAX_FULL_NOTE_CHARS) {
+      fullNoteContent = fullNoteContent.slice(0, MAX_FULL_NOTE_CHARS) + '...';
+    }
+    parentContextLines.push(`Full Note Content: ${fullNoteContent}`);
+  }
+  if (parentNoteSummary) parentContextLines.unshift(`Note Summary: ${parentNoteSummary}`);
+  if (parentNoteTitle) parentContextLines.unshift(`Note Title: ${parentNoteTitle}`);
+
   // 5. Log deduped results and block types
   // logToFile('Deduped results:');
   const blockTypesInContext = dedupedResults.map(r => r.payload?.type).filter(Boolean);
@@ -234,10 +268,14 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
   if (truncated) {
     console.warn(`[RAG] Context truncated to ${MAX_CONTEXT_CHARS} characters. Some facts omitted.`);
   }
-  console.log(`[RAG] Number of facts included in LLM context: ${contextFacts.length}`);
-  console.log('[RAG] Facts included in LLM context:', contextFacts);
+  // --- Sandwich/hybrid context: summary/title, truncated full note, then top Qdrant facts ---
+  const hybridContextFacts = [...parentContextLines, ...contextFacts];
+
+  console.log(`[RAG] Number of facts included in LLM context: ${hybridContextFacts.length}`);
+  console.log('[RAG] Facts included in LLM context:', hybridContextFacts);
+  console.log(`[RAG] Current LLM Model: ${model}`);
   // 7. Collect fact details for debugging/logging/return
-  const factDetails = contextFacts.map((fact, idx) => ({
+  const factDetails = hybridContextFacts.map((fact, idx) => ({
     fact,
     score: dedupedResults[idx]?.score ?? null,
     blockId: dedupedResults[idx]?.payload?.blockId ?? null,
@@ -247,8 +285,24 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
   factDetails.forEach((f, i) => {
     // logToFile(`#${i + 1}: Score=${f.score}, BlockId=${f.blockId}, Content=${f.content}`);
   });
-  const context = `${instructions}\nFacts:\n${contextFacts.join('\n')}\n`;
-  const prompt = `${context}\nQuestion: ${query}\nAnswer:`;
+  const context = `${instructions}\nFacts:\n${hybridContextFacts.join('\n')}\n`;
+  const prompt = `
+    You are a knowledgeable assistant answering user questions using retrieved contextual facts.
+
+    Instructions:
+    - Base your answer strictly on the contextual facts below.
+    - If the information is not present or incomplete, respond: "Insufficient information."
+    - Use concise, clear language.
+    - Facts may be paraphrased or partial; reason semantically when needed.
+
+    Contextual Facts:
+    ${hybridContextFacts.join('\n')}
+
+    User Question:
+    ${query}
+
+    Answer:
+    `;
 
   // 8. LLM call with timing
   let answer = '';
@@ -256,7 +310,14 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
     const url = new URL('http://localhost:11434/api/generate');
     const isHttps = url.protocol === 'https:';
     const reqModule = isHttps ? https : http;
-    const postData = JSON.stringify({ model: 'deepseek-llm:7b', prompt });
+    const postData = JSON.stringify({
+      model,
+      prompt,
+      options: {
+        temperature: typeof temperature === 'number' ? temperature : 0.8,
+        top_p: typeof top_p === 'number' ? top_p : 0.9,
+      },
+    });
     const options = {
       hostname: url.hostname,
       port: url.port || (isHttps ? 443 : 80),
@@ -270,9 +331,9 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
     const tLLMStart = Date.now();
     answer = await new Promise((resolve, reject) => {
       let answerStr = '';
-      const req = reqModule.request(options, (res2: any) => {
+      const req = reqModule.request(options, (res2) => {
         let buffer = '';
-        res2.on('data', (chunk: Buffer) => {
+        res2.on('data', (chunk) => {
           buffer += chunk.toString();
           let lines = buffer.split('\n');
           buffer = lines.pop() || '';
@@ -281,8 +342,6 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
               const data = JSON.parse(line);
               if (data.response) answerStr += data.response;
               if (data.done) {
-                // Log the raw LLM output for debugging
-                // logToFile('[LLM RAW OUTPUT]');
                 resolve(answerStr.trim() || 'No answer generated by model.');
                 return;
               }
@@ -290,19 +349,16 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
           }
         });
         res2.on('end', () => {
-          // Log the raw LLM output for debugging
-          // logToFile('[LLM RAW OUTPUT]');
           resolve(answerStr.trim() || 'No answer generated by model.');
         });
       });
-      req.on('error', (err: any) => reject('Failed to generate answer.'));
+      req.on('error', (err) => reject('Failed to generate answer.'));
       req.write(postData);
       req.end();
     });
-    // logToFile(`[TIMING] LLM call: ${Date.now() - tLLMStart}ms`);
   } else {
     answer = 'No relevant content found to answer the question.';
   }
   // logToFile(`[TIMING] Total pipeline time: ${Date.now() - startTotal}ms`);
   return { results: dedupedResults, answer, facts: factDetails };
-} 
+}

@@ -253,12 +253,19 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
 
       // 2. RAG search step (Electron IPC)
       if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.ragQuery) {
+        // Get LLM settings from localStorage
+        const model = localStorage.getItem('llmModel') || '';
+        const temperature = Number(localStorage.getItem('llmTemperature')) || 0.8;
+        const top_p = Number(localStorage.getItem('llmTopP')) || 0.9;
         const result = await window.electronAPI.ragQuery({
           note_id: note.id,
           query: userQuery,
           topK: 10,
           allBlocks: note.blocks,
           folder_id: note.folderId,
+          model,
+          temperature,
+          top_p,
         });
         if (!result.success) {
           throw new Error(result.error || "Failed to get answer from RAG pipeline");
