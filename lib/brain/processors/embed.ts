@@ -1,23 +1,19 @@
 // OpenAI and Qdrant embedding/search utility (scaffold)
-import axios from 'axios'; // Make sure to install axios: npm install axios @types/axios
+import * as axios from 'axios'; // Make sure to install axios: npm install axios @types/axios
 
 // Embedding provider selection
 const EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER || 'ollama'; // 'ollama' or 'openai'
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
-// Validate environment variables for Qdrant
-const QDRANT_URL = process.env.QDRANT_URL;
-if (!QDRANT_URL) {
-  throw new Error('QDRANT_URL environment variable is not set.');
-}
+// Hard-coded Qdrant config for production
+const QDRANT_URL = "https://39d385fd-d382-4626-88ff-3e30f74825bc.us-east4-0.gcp.cloud.qdrant.io:6333";
+const QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.koHi2gFKW1KyzGSdB4JI3NplNK1em0iIeKDfKdhMjsk";
 
 // Validate OpenAI env only if using OpenAI
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 if (EMBEDDING_PROVIDER === 'openai' && !OPENAI_API_KEY) {
   throw new Error('OPENAI_API_KEY environment variable is not set.');
 }
-
-const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
 
 /**
  * Get embedding for a given text using Ollama or OpenAI API.
@@ -135,7 +131,7 @@ export async function upsertQdrantVector({
 export async function searchQdrant({
   queryEmbedding,
   filter,
-  topK = 5,
+  topK = 20,
   collection = 'notes',
 }: {
   queryEmbedding: number[];

@@ -17,6 +17,7 @@ export const BLOCK_TYPE_COLORS: Record<Block["type"], string> = {
   why: "border-indigo-500 bg-indigo-50 dark:bg-indigo-900/10",
   when: "border-pink-500 bg-pink-50 dark:bg-pink-900/10",
   check: "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/10",
+  "where-ref": "border-gray-500 bg-gray-50 dark:bg-gray-700/30", // placeholder color
 }
 
 export const BLOCK_TYPE_LABELS: Record<Block["type"], string> = {
@@ -31,6 +32,7 @@ export const BLOCK_TYPE_LABELS: Record<Block["type"], string> = {
   why: "WHY",
   when: "WHEN",
   check: "CHECK",
+  "where-ref": "WHERE REF", // placeholder label
 }
 
 export const BLOCK_TYPE_ICONS: Record<Block["type"], React.ReactNode> = {
@@ -45,6 +47,7 @@ export const BLOCK_TYPE_ICONS: Record<Block["type"], React.ReactNode> = {
   why: <HelpCircle className="w-4 h-4" />,
   when: <Clock className="w-4 h-4" />,
   check: <CheckSquare className="w-4 h-4" />,
+  "where-ref": <span>🔗</span>, // placeholder icon
 }
 
 export const BLOCK_TYPE_PLACEHOLDERS: Record<Block["type"], string> = {
@@ -59,6 +62,7 @@ export const BLOCK_TYPE_PLACEHOLDERS: Record<Block["type"], string> = {
   why: "Enter a reason, cause, or explanation...",
   when: "Enter a time, date, or temporal reference...",
   check: "Enter a task or todo item...",
+  "where-ref": "Enter a reference to a location or resource...", // placeholder
 }
 
 export const BLOCK_TYPE_BADGE_CLASSES: Record<Block["type"], string> = {
@@ -73,4 +77,5 @@ export const BLOCK_TYPE_BADGE_CLASSES: Record<Block["type"], string> = {
   why: "bg-indigo-100 dark:bg-indigo-900/30",
   when: "bg-pink-100 dark:bg-pink-900/30",
   check: "bg-emerald-100 dark:bg-emerald-900/30",
+  "where-ref": "bg-gray-100 dark:bg-gray-700", // placeholder
 } 

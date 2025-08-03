@@ -3,6 +3,7 @@ import * as path from "path"
 import * as fs from "fs"
 import { spawn, ChildProcess } from 'child_process';
 const serve = require("electron-serve")
+const { runRagPipeline } = require("./lib/ragHandler.js");
 
 // Determine if we're in development or production
 const isDev = process.env.NODE_ENV === "development"
@@ -328,5 +329,36 @@ ipcMain.handle('ollama-toggle', async (_event, enabled: boolean) => {
   } else {
     await stopOllama();
     return { running: false };
+  }
+});
+
+ipcMain.handle('ollama-list', async () => {
+  return new Promise<string[]>((resolve) => {
+    const { spawn } = require('child_process');
+    const proc = spawn('ollama', ['list']);
+    let output = '';
+    proc.stdout.on('data', (data: Buffer) => {
+      output += data.toString();
+    });
+    proc.on('close', () => {
+      // Parse output, skip header, get first column (model name)
+      const lines = output.split('\n').slice(1);
+      const models = lines
+        .map(line => line.trim().split(/\s+/)[0])
+        .filter(name => name && name !== 'NAME');
+      resolve(models);
+    });
+    proc.on('error', () => resolve([]));
+  });
+});
+
+ipcMain.handle('rag-query', async (_event, { note_id, query, allBlocks, topK = 10, folder_id, model, temperature, top_p }) => {
+  console.log('[Main] rag-query handler received:', query);
+  try {
+    const result = await runRagPipeline({ note_id, query, allBlocks, topK, folder_id, model, temperature, top_p });
+    return { success: true, ...result };
+  } catch (error) {
+    console.error('RAG error:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 });

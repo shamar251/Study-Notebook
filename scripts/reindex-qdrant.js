@@ -9,9 +9,12 @@
   async function reindexAllNotes() {
     await initializeDatabase();
     const notes = await db.notes.toArray();
+    const report = [];
     for (const note of notes) {
       const blocks = note.blocks || [];
       const processedBlockIds = new Set();
+      let allChunks = [];
+      let noteChunkReport = { noteId: note.id, noteTitle: note.title, chunks: [] };
       for (const block of blocks) {
         if (processedBlockIds.has(block.id)) continue;
         if (block.type === 'who') {
@@ -30,8 +33,10 @@
             }
           }
           const chunks = chunkText(combined);
+          allChunks = allChunks.concat(chunks);
           for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
+            noteChunkReport.chunks.push({ blockId: block.id, blockType: 'who+what', position: i, content: chunk });
             const embedding = await getEmbedding(chunk);
             await upsertQdrantVector({
               id: uuidv4(),
@@ -50,8 +55,10 @@
           processedBlockIds.add(block.id);
         } else {
           const chunks = chunkText(block.content || '');
+          allChunks = allChunks.concat(chunks);
           for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
+            noteChunkReport.chunks.push({ blockId: block.id, blockType: block.type, position: i, content: chunk });
             const embedding = await getEmbedding(chunk);
             await upsertQdrantVector({
               id: uuidv4(),
@@ -69,8 +76,13 @@
           processedBlockIds.add(block.id);
         }
       }
+      report.push(noteChunkReport);
+      console.log(`[QDRANT DEBUG] Total unique chunks for note ${note.title} (${note.id}):`, new Set(allChunks).size);
       console.log(`Re-indexed note: ${note.title} (${note.id})`);
     }
+    const fs = await import('fs').catch(() => require('fs'));
+    fs.writeFileSync('qdrant-chunk-report.json', JSON.stringify(report, null, 2), 'utf-8');
+    console.log('Wrote qdrant-chunk-report.json');
     console.log('Re-indexing complete.');
   }
 

@@ -5,6 +5,7 @@ import { contextBridge, ipcRenderer } from "electron"
 contextBridge.exposeInMainWorld("electronAPI", {
   saveFile: (data: { content: string; filePath?: string }) => ipcRenderer.invoke("save-file", data),
   openFile: () => ipcRenderer.invoke("open-file"),
+  ragQuery: (args: any) => ipcRenderer.invoke("rag-query", args),
 })
 
 // Add TypeScript interface for window object
@@ -17,6 +18,7 @@ declare global {
         message?: string
       }>
       openFile: () => Promise<{ success: boolean; content?: string; filePath?: string; message?: string }>
+      ragQuery: (args: any) => Promise<any>;
     }
   }
 }

@@ -32,6 +32,19 @@ export default function SettingsDialog({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [ollamaEnabled, setOllamaEnabled] = useState<boolean>(true);
+  const [llmModels, setLlmModels] = useState<string[]>([
+    'deepseek-llm:7b',
+    'deepseek-r1:8b',
+    'deepseek-r1:7b',
+    'deepseek-llm:latest',
+    'nomic-embed-text:latest',
+    'qwen2:latest',
+    'llama3:latest',
+    'llama3.1:latest',
+  ]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [llmTemperature, setLlmTemperature] = useState<number>(0.8);
+  const [llmTopP, setLlmTopP] = useState<number>(0.9);
 
   useEffect(() => {
     const session = supabase.auth.getSession().then(({ data }) => setUser(data.session?.user ?? null));
@@ -46,6 +59,29 @@ export default function SettingsDialog({
   useEffect(() => {
     const stored = localStorage.getItem('ollamaEnabled');
     if (stored !== null) setOllamaEnabled(stored === 'true');
+  }, []);
+
+  useEffect(() => {
+    async function fetchModelsFromOllama() {
+      if (ipcRenderer) {
+        try {
+          const result = await ipcRenderer.invoke('ollama-list');
+          if (Array.isArray(result) && result.length > 0) {
+            setLlmModels(result);
+          }
+        } catch (e) {
+          // fallback to static list
+        }
+      }
+    }
+    fetchModelsFromOllama();
+    // Restore settings from localStorage
+    const storedModel = localStorage.getItem('llmModel');
+    const storedTemp = localStorage.getItem('llmTemperature');
+    const storedTopP = localStorage.getItem('llmTopP');
+    if (storedModel) setSelectedModel(storedModel);
+    if (storedTemp) setLlmTemperature(Number(storedTemp));
+    if (storedTopP) setLlmTopP(Number(storedTopP));
   }, []);
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -76,6 +112,19 @@ export default function SettingsDialog({
     }
   };
 
+  const handleModelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setSelectedModel(e.target.value);
+    localStorage.setItem('llmModel', e.target.value);
+  };
+  const handleTempChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setLlmTemperature(Number(e.target.value));
+    localStorage.setItem('llmTemperature', e.target.value);
+  };
+  const handleTopPChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setLlmTopP(Number(e.target.value));
+    localStorage.setItem('llmTopP', e.target.value);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl rounded-xl bg-[#f8f5ef] dark:bg-[#232323] border-0 shadow-xl">
@@ -96,13 +145,27 @@ export default function SettingsDialog({
             </div>
             <div className="text-xs text-muted-foreground">Great for reading at night</div>
           </div>
-          {/* Ollama Embeddings Section */}
+          {/* LLM Model & Settings Section */}
           <div className="pt-2 border-t border-border">
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-base">Ollama Embeddings</span>
-              <Switch checked={ollamaEnabled} onCheckedChange={handleToggleOllama} />
+            <div className="font-semibold text-base mb-2">Local Llama Model</div>
+            <div className="flex items-center gap-2 mb-2">
+              <select value={selectedModel} onChange={handleModelChange} className="border rounded px-2 py-1 text-sm bg-background">
+                <option value="">Select model</option>
+                {llmModels.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <span className="text-xs text-muted-foreground">(from Ollama)</span>
             </div>
-            <div className="text-xs text-muted-foreground">Enable or disable local Ollama embeddings</div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <label className="flex items-center gap-2 text-sm">
+                Temperature
+                <input type="number" min="0" max="2" step="0.01" value={llmTemperature} onChange={handleTempChange} className="w-20 border rounded px-2 py-1 bg-background" />
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                Top P
+                <input type="number" min="0" max="1" step="0.01" value={llmTopP} onChange={handleTopPChange} className="w-20 border rounded px-2 py-1 bg-background" />
+              </label>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">Change your local Llama model and LLM generation settings</div>
           </div>
           {/* Import/Export Section */}
           <div className="pt-2 border-t border-border">

@@ -113,6 +113,21 @@ export const chatCacheUtils = {
   }
 };
 
+// Add this at the top of the file for Electron IPC type support
+declare global {
+  interface Window {
+    electronAPI: {
+      saveFile: (data: { content: string; filePath?: string }) => Promise<{
+        success: boolean;
+        filePath?: string;
+        message?: string;
+      }>;
+      openFile: () => Promise<{ success: boolean; content?: string; filePath?: string; message?: string }>;
+      ragQuery: (args: any) => Promise<any>;
+    };
+  }
+}
+
 // Animated typing indicator component
 const TypingIndicator: React.FC = () => {
   const [dots, setDots] = useState(0);
@@ -208,7 +223,6 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
     setQuery("");
     setError(null);
 
-    // Add timestamp to messages
     const userMessage: ChatMessage = {
       sender: "user",
       text: userQuery,
@@ -219,7 +233,7 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
     setLoading(true);
 
     try {
-      // 1. First, ensure the note is embedded
+      // 1. Embedding step
       if (!isEmbedded) {
         const embedRes = await fetch("/api/embed", {
           method: "POST",
@@ -231,46 +245,43 @@ const NoteChatWidget: React.FC<NoteChatWidgetProps> = ({ note, testSession }) =>
           })
         });
         if (!embedRes.ok) {
-          setError('Failed to embed note for RAG.');
-          setLoading(false);
-          return;
+          const embedText = await embedRes.text();
+          throw new Error(`Embed error: ${embedRes.status} ${embedRes.statusText} - ${embedText}`);
         }
         setIsEmbedded(true);
       }
-      // 2. Now run the RAG search as before
-      const res = await fetch("http://localhost:3001/api/rag", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // 2. RAG search step (Electron IPC)
+      if (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.ragQuery) {
+        // Get LLM settings from localStorage
+        const model = localStorage.getItem('llmModel') || '';
+        const temperature = Number(localStorage.getItem('llmTemperature')) || 0.8;
+        const top_p = Number(localStorage.getItem('llmTopP')) || 0.9;
+        const result = await window.electronAPI.ragQuery({
           note_id: note.id,
           query: userQuery,
+          topK: 10,
           allBlocks: note.blocks,
-          folder_id: note.folderId
-        }),
-      });
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (e) {
-        throw new Error(`Non-JSON response: ${text.slice(0, 100)}`);
+          folder_id: note.folderId,
+          model,
+          temperature,
+          top_p,
+        });
+        if (!result.success) {
+          throw new Error(result.error || "Failed to get answer from RAG pipeline");
+        }
+        const aiMessage: ChatMessage = {
+          sender: "ai",
+          text: result.answer || "(No answer)",
+          timestamp: Date.now()
+        };
+        setConversation((prev) => [...prev, aiMessage]);
+      } else {
+        // Fallback for web: show error or keep old fetch if needed
+        setError("RAG chat is only available in the Electron app.");
       }
-      if (!res.ok) {
-        throw new Error(data.error || "Unknown error");
-      }
-
-      // Add timestamp to AI response
-      const aiMessage: ChatMessage = {
-        sender: "ai",
-        text: data.answer || "(No answer)",
-        timestamp: Date.now()
-      };
-
-      setConversation((prev) => [...prev, aiMessage]);
     } catch (e: any) {
       setError(e.message || "Failed to fetch results");
 
-      // Add error message with timestamp
       const errorMessage: ChatMessage = {
         sender: "ai",
         text: `Error: ${e.message || "Failed to fetch results"}`,
