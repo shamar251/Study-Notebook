@@ -224,22 +224,25 @@ export default function NoteApp() {
   const createFolderHandler = async (name: string, parentId: string | null = null, description: string = "") => {
     // If there are no folders, make this a root folder
     const actualParentId = folders.length === 0 ? null : parentId;
+    // --- FIX: Always generate a unique id for new folders ---
+    const uniqueId = `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const newFolder: Folder = {
-      id: `folder-${Date.now()}`,
+      id: uniqueId,
       name,
       parentId: actualParentId,
       description,
       createdAt: Date.now(),
       order: 0,
-      path: actualParentId ? [actualParentId, `folder-${Date.now()}`] : [`folder-${Date.now()}`]
+      path: actualParentId ? [actualParentId, uniqueId] : [uniqueId]
     };
+    // --- END FIX ---
     // Optimistically update UI
     setFolders(prev => [...prev, newFolder]);
     try {
       await addFolder(newFolder);
       toast({
         title: "Folder created",
-        description: `Folder "${name}" has been created.`,
+        description: `Folder \"${name}\" has been created.`,
       });
     } catch (error) {
       // Revert if DB fails
@@ -667,6 +670,19 @@ export default function NoteApp() {
         if (activeNote?.id === note.id) {
           setActiveNote(allNotes.find(n => n.id === note.id) || null);
         }
+
+        // --- FIX: Refresh folderNotes if the moved note is in the current folder or its descendants ---
+        if (activeFolder) {
+          // Get all descendant folder IDs
+          const childFolderIds = await getAllChildFolderIds(activeFolder);
+          const allFolderIds = new Set([activeFolder, ...childFolderIds]);
+          if (allFolderIds.has(newParentId)) {
+            // The moved note is now in the current folder or a descendant
+            const notesInFolder = allNotes.filter(n => allFolderIds.has(n.folderId));
+            setFolderNotes(notesInFolder);
+          }
+        }
+        // --- END FIX ---
       }
     } catch (error) {
       console.error('Error moving item:', error);
