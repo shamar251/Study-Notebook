@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Folder as FolderIcon, FileText, Plus, Edit, Repeat, Layers, ListChecks, BarChart, Table, Timer, X, ChevronDown, ChevronRight } from "lucide-react"
+import { Folder as FolderIcon, FileText, Plus, Edit, Repeat, Layers, ListChecks, BarChart, Table, Timer, X, ChevronDown, ChevronRight, BookOpen, Lightbulb } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
@@ -37,7 +37,7 @@ interface FolderStudyModeProps {
   onCreateSubfolder: (name: string, description?: string) => void
   onEditDescription?: (description: string) => void
   onEditName?: (name: string) => void
-  onSelectMode: (mode: "flashcards" | "quiz" | "test", note?: Note, subfolderId?: string) => void
+  onSelectMode: (mode: "flashcards" | "quiz" | "test" | "review", note?: Note, subfolderId?: string) => void
   onNoteClick: (note: Note) => void
 }
 
@@ -533,6 +533,7 @@ export default function FolderStudyMode({
                   <DropdownMenuItem onClick={() => onSelectMode("flashcards")}> <Layers className="w-4 h-4 mr-2" /> Flashcards</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onSelectMode("quiz")}> <ListChecks className="w-4 h-4 mr-2" /> Quiz</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => onSelectMode("test")}> <Timer className="w-4 h-4 mr-2" /> Test</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => onSelectMode("review")}> <Lightbulb className="w-4 h-4 mr-2" /> Review</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
               {/* Study stats section */}

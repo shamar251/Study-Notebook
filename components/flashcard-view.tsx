@@ -12,11 +12,16 @@ import { InlineMath } from 'react-katex'
 import type { Block } from "@/lib/db"
 import { BlockConnectionManager } from "@/lib/block-connections"
 import { getConnectedGroup } from "@/hooks/use-block-connections"
+import { SpacedRepetitionService, type StudyItemWithBlock } from '@/lib/spaced-repetition'
+import { Rating } from 'ts-fsrs'
+import { useToast } from "@/components/ui/use-toast"
+import { db } from "@/lib/db"
 
 interface FlashcardViewProps {
   note?: Note
   notes?: Note[]
   folderName?: string
+  studyItems?: StudyItemWithBlock[] // Use proper type for study items
   onComplete?: (noteId: string) => void
 }
 
@@ -69,18 +74,28 @@ function getOrderedHowBlocksForWho(whoBlock: Block, allBlocks: Block[]): Block[]
     .sort((a, b) => allBlocks.indexOf(a) - allBlocks.indexOf(b));
 }
 
-export default function FlashcardView({ note, notes, folderName, onComplete }: FlashcardViewProps) {
+export default function FlashcardView({ note, notes, folderName, studyItems, onComplete }: FlashcardViewProps) {
   const [flashcards, setFlashcards] = useState<Flashcard[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)
   const [isGroupMode, setIsGroupMode] = useState(false)
   const [completed, setCompleted] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [cardRatings, setCardRatings] = useState<Map<number, Rating>>(new Map())
+  const { toast } = useToast()
 
   useEffect(() => {
     // Determine if we're in group mode (studying a folder)
     setIsGroupMode(!!notes && notes.length > 0)
     console.log(`Flashcard view - Group mode: ${isGroupMode}, Notes count: ${notes?.length || 0}`)
+    console.log(`Flashcard view - Study items received:`, studyItems?.map(item => ({
+      id: item.id,
+      type: item.type,
+      blockId: item.blockId,
+      noteId: item.noteId,
+      noteTitle: item.note?.title || 'Unknown',
+      blockContent: item.block?.content?.substring(0, 50) || 'No content'
+    })) || 'No study items')
 
     // Generate flashcards from who/what blocks
     const cards: Flashcard[] = []
@@ -172,7 +187,79 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
       })
     }
 
-    if (note) {
+    // If studyItems are provided, create flashcards only from those specific items
+    if (studyItems && studyItems.length > 0) {
+      console.log("[FlashcardView] studyItems provided:", studyItems.map(item => ({
+        id: item.id,
+        type: item.type,
+        blockId: item.blockId,
+        noteId: item.noteId,
+        noteTitle: item.note?.title || 'Unknown'
+      })))
+
+      studyItems.forEach((studyItem) => {
+        if (studyItem.block && studyItem.note) {
+          // Create flashcard from the specific study item
+          if (studyItem.type === "who" && studyItem.block.content) {
+            // For WHO blocks, we need to find the corresponding WHAT block
+            const noteBlocks = studyItem.note.blocks;
+            const howBlocks = getOrderedHowBlocksForWho(studyItem.block, noteBlocks);
+
+            if (howBlocks.length === 1) {
+              const singleHowBlock = howBlocks[0];
+              if (singleHowBlock.content) {
+                cards.push({
+                  front: studyItem.block.content,
+                  back: singleHowBlock.content,
+                  frontImage: studyItem.block.image,
+                  backImage: singleHowBlock.image,
+                  noteId: (studyItem.noteId || studyItem.note.id) as string,
+                  noteTitle: studyItem.note.title,
+                  math: studyItem.block.math === true,
+                  whatMath: singleHowBlock.math,
+                  hint: "how #1"
+                });
+              }
+            } else if (howBlocks.length > 1) {
+              // Multiple HOW blocks - create a card for each
+              howBlocks.forEach((howBlock, index) => {
+                if (howBlock.content && studyItem.block.content) {
+                  cards.push({
+                    front: studyItem.block.content,
+                    back: howBlock.content,
+                    frontImage: studyItem.block.image,
+                    backImage: howBlock.image,
+                    noteId: (studyItem.noteId || studyItem.note.id) as string,
+                    noteTitle: studyItem.note.title,
+                    math: studyItem.block.math === true,
+                    whatMath: howBlock.math,
+                    hint: `how #${index + 1}`
+                  });
+                }
+              });
+            }
+          } else if (studyItem.type === "what" && studyItem.block.content) {
+            // For WHAT blocks, we need to find the corresponding WHO block
+            const noteBlocks = studyItem.note.blocks;
+            const whoBlock = noteBlocks.find((b: Block) => b.type === "who" && b.linkedBlockIds?.includes(studyItem.blockId));
+
+            if (whoBlock && whoBlock.content) {
+              cards.push({
+                front: whoBlock.content,
+                back: studyItem.block.content,
+                frontImage: whoBlock.image,
+                backImage: studyItem.block.image,
+                noteId: studyItem.noteId || studyItem.note.id,
+                noteTitle: studyItem.note.title,
+                math: whoBlock.math === true,
+                whatMath: studyItem.block.math,
+                hint: undefined
+              });
+            }
+          }
+        }
+      });
+    } else if (note) {
       console.log("[FlashcardView] note.blocks:", note.blocks)
       addFlashcardsFromBlocks(note.blocks, note.id, note.title)
     } else if (notes) {
@@ -190,7 +277,7 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
     setFlipped(false)
     setCompleted(false)
     setProgress(0)
-  }, [note, notes])
+  }, [note, notes, studyItems])
 
   useEffect(() => {
     // Update progress
@@ -204,6 +291,25 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
     setCurrentIndex((prev) => (prev > 0 ? prev - 1 : flashcards.length - 1))
   }
 
+  const handleRating = async (rating: Rating) => {
+    // Store the rating for this card
+    setCardRatings(prev => new Map(prev).set(currentIndex, rating))
+
+    // Create or update study item immediately with the rating
+    await createStudyItemFromCurrentCard()
+
+    // Move to next card or complete
+    if (currentIndex < flashcards.length - 1) {
+      setFlipped(false)
+      setCurrentIndex(currentIndex + 1)
+    } else {
+      setCompleted(true)
+      if (onComplete && flashcards.length > 0) {
+        onComplete(flashcards[currentIndex].noteId)
+      }
+    }
+  }
+
   const goToNext = () => {
     setFlipped(false)
 
@@ -215,6 +321,169 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
         // In group mode, we'll just use the ID of the last card's note
         onComplete(flashcards[currentIndex].noteId)
       }
+      // Create study items from completed flashcards
+      createStudyItemsFromFlashcards()
+    }
+  }
+
+  const createStudyItemFromCurrentCard = async () => {
+    const currentCard = flashcards[currentIndex];
+    const notesToProcess = notes || (note ? [note] : []);
+    const currentNote = notesToProcess.find(n => n.id === currentCard?.noteId);
+
+    if (!currentCard || !currentNote) return;
+
+    try {
+      // Find the block that corresponds to this flashcard
+      const block = currentNote.blocks.find(b =>
+        b.type === 'who' && b.content === currentCard.front
+      );
+
+      if (!block) {
+        toast({
+          title: "Info",
+          description: "No matching block found for this flashcard",
+        });
+        return;
+      }
+
+      // Create study items from the block
+      const studyItems = await SpacedRepetitionService.createStudyItemsFromBlocks(
+        [block],
+        currentNote
+      );
+
+      if (studyItems.length > 0) {
+        console.log('Created study items:', studyItems);
+        toast({
+          title: "Success",
+          description: `Created ${studyItems.length} study item(s) for spaced repetition`,
+        });
+      } else {
+        console.log('No study items created - card type may not be supported');
+        toast({
+          title: "Info",
+          description: "This card type is not supported for spaced repetition",
+        });
+      }
+    } catch (error) {
+      console.error('Error creating study item:', error);
+
+      let errorMessage = "Failed to create study item for spaced repetition";
+      let showRetry = false;
+
+      if (error instanceof Error) {
+        if (error.message.includes('Database is not properly initialized')) {
+          errorMessage = "Database is not properly initialized. Please refresh the page and try again.";
+          showRetry = true;
+        } else if (error.message.includes('Database upgrade failed')) {
+          errorMessage = "Database operation failed. Please refresh the page and try again.";
+          showRetry = true;
+        } else if (error.message.includes('Database tables could not be created')) {
+          errorMessage = "Database operation failed. Please refresh the page and try again.";
+          showRetry = true;
+        } else {
+          errorMessage = error.message;
+          showRetry = true;
+        }
+      }
+
+      // Log debugging information
+      console.log('For debugging, you can use these console commands:');
+      console.log('- checkDatabaseHealth() - Check database schema status');
+      console.log('- initializeDatabase() - Initialize database manually');
+      console.log('- debugDatabase() - Basic database status');
+      console.log('- resetDatabase() - Reset database (WARNING: clears all data)');
+
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+        action: showRetry ? (
+          <button
+            onClick={() => {
+              // Wait a moment and retry
+              setTimeout(() => {
+                createStudyItemFromCurrentCard();
+              }, 1000);
+            }}
+            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
+          >
+            Retry
+          </button>
+        ) : undefined
+      });
+    }
+  };
+
+  const getRatingLabel = (rating: Rating) => {
+    switch (rating) {
+      case Rating.Again: return "Again"
+      case Rating.Hard: return "Hard"
+      case Rating.Good: return "Good"
+      case Rating.Easy: return "Easy"
+      default: return "Unknown"
+    }
+  }
+
+  const getRatingColor = (rating: Rating) => {
+    switch (rating) {
+      case Rating.Again: return "bg-red-500 hover:bg-red-600"
+      case Rating.Hard: return "bg-orange-500 hover:bg-orange-600"
+      case Rating.Good: return "bg-blue-500 hover:bg-blue-600"
+      case Rating.Easy: return "bg-green-500 hover:bg-green-600"
+      default: return "bg-gray-500 hover:bg-gray-600"
+    }
+  }
+
+  const createStudyItemsFromFlashcards = async () => {
+    try {
+      console.log('Creating study items from completed flashcard session...');
+      const notesToProcess = notes || (note ? [note] : []);
+
+      for (const currentNote of notesToProcess) {
+        console.log(`Processing note: ${currentNote.title}`);
+
+        // Check if study items already exist for this note
+        const existingItems = await SpacedRepetitionService.getStudyItems(currentNote.id);
+        console.log(`Existing study items for note ${currentNote.title}:`, existingItems.length);
+
+        if (existingItems.length === 0) {
+          // Create study items from WHO and WHAT blocks
+          const whoBlocks = currentNote.blocks.filter(b => b.type === 'who');
+          const whatBlocks = currentNote.blocks.filter(b => b.type === 'what');
+
+          console.log(`Found ${whoBlocks.length} WHO blocks and ${whatBlocks.length} WHAT blocks`);
+
+          // Create study items from WHO blocks that have linked WHAT blocks
+          for (const whoBlock of whoBlocks) {
+            if (whoBlock.linkedBlockIds && whoBlock.linkedBlockIds.length > 0) {
+              const linkedWhatBlock = currentNote.blocks.find(b =>
+                b.id === whoBlock.linkedBlockIds![0] && b.type === 'what'
+              );
+
+              if (linkedWhatBlock) {
+                console.log(`Creating study item for WHO block: ${whoBlock.content}`);
+                await SpacedRepetitionService.createStudyItemsFromBlocks([whoBlock], currentNote);
+              }
+            }
+          }
+
+          // Also create study items from standalone WHAT blocks
+          for (const whatBlock of whatBlocks) {
+            if (!whatBlock.linkedBlockIds || whatBlock.linkedBlockIds.length === 0) {
+              console.log(`Creating study item for standalone WHAT block: ${whatBlock.content}`);
+              await SpacedRepetitionService.createStudyItemsFromBlocks([whatBlock], currentNote);
+            }
+          }
+        } else {
+          console.log(`Study items already exist for note ${currentNote.title}`);
+        }
+      }
+
+      console.log('Study items creation completed');
+    } catch (error) {
+      console.error('Error creating study items from flashcards:', error);
     }
   }
 
@@ -254,6 +523,21 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
           </div>
           <h2 className="mb-2 text-2xl font-bold">Session Complete!</h2>
           <p className="mb-6 text-gray-500">You've reviewed all {flashcards.length} flashcards in this session.</p>
+
+          {/* Spaced Repetition Integration */}
+          <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+            <h3 className="text-lg font-semibold mb-2 text-blue-800 dark:text-blue-200">
+              Spaced Repetition Active! 🧠
+            </h3>
+            <p className="text-sm text-blue-700 dark:text-blue-300">
+              Your ratings have been saved to optimize future review intervals.
+              Cards you found difficult will appear sooner, while easy cards will have longer intervals.
+            </p>
+            <div className="mt-3 text-xs text-blue-600 dark:text-blue-400">
+              Rated cards: {cardRatings.size} / {flashcards.length}
+            </div>
+          </div>
+
           <div className="flex gap-4 justify-center">
             <Button variant="outline" onClick={restartSession}>
               <RotateCcw className="w-4 h-4 mr-2" /> Restart Session
@@ -373,14 +657,38 @@ export default function FlashcardView({ note, notes, folderName, onComplete }: F
           </div>
         </div>
 
-        <div className="flex items-center justify-center mt-6 gap-4">
-          <Button variant="outline" size="sm" onClick={() => setFlipped(false)}>
-            <RotateCcw className="w-4 h-4 mr-2" /> Reset
-          </Button>
-          <Button size="sm" onClick={goToNext}>
-            {currentIndex < flashcards.length - 1 ? "Next Card" : "Complete Session"}
-          </Button>
-        </div>
+        {!flipped ? (
+          <div className="flex items-center justify-center mt-6 gap-4">
+            <Button variant="outline" size="sm" onClick={() => setFlipped(false)}>
+              <RotateCcw className="w-4 h-4 mr-2" /> Reset
+            </Button>
+            <Button size="sm" onClick={() => setFlipped(true)}>
+              Show Answer
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center mt-6 gap-4">
+            <div className="flex gap-3 w-full max-w-2xl">
+              {[Rating.Again, Rating.Hard, Rating.Good, Rating.Easy].map((rating) => (
+                <Button
+                  key={rating}
+                  onClick={() => handleRating(rating)}
+                  className={`${getRatingColor(rating)} text-white text-sm py-3 px-4 flex-1`}
+                >
+                  {getRatingLabel(rating)}
+                </Button>
+              ))}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={goToNext}
+              className="mt-2"
+            >
+              Skip Rating
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

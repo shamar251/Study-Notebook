@@ -124,6 +124,8 @@ declare global {
       }>;
       openFile: () => Promise<{ success: boolean; content?: string; filePath?: string; message?: string }>;
       ragQuery: (args: any) => Promise<any>;
+      gradeAnswer: (args: any) => Promise<any>;
+      log: (payload: any) => Promise<any>;
     };
   }
 }

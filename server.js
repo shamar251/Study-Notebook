@@ -25,11 +25,11 @@ app.use((err, req, res, next) => {
   });
 });
 
-const { getEmbedding, searchQdrant } = require('./dist/lib/brain/processors/embed.js');
+const { getEmbedding, searchQdrant } = require('./lib/brain/processors/embed.js');
 const axios = require('axios');
 const http = require('http');
 const https = require('https');
-const { Block } = require('./dist/lib/db.js');
+const { Block } = require('./lib/db.js');
 
 function isSummarizationQuery(query) {
   const q = query.toLowerCase();

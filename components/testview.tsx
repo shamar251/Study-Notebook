@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { db, Note, Block, TestSession, saveTestSession, getSessionsForNote } from "@/lib/db";
-import { FolderIcon, FileText, Timer, CheckCircle, Check, X, ArrowLeft } from "lucide-react";
+import { FolderIcon, FileText, Timer, CheckCircle, Check, X, ArrowLeft, Loader2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -325,7 +325,7 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>(defaultNoteId ? [defaultNoteId] : []);
   const [questions, setQuestions] = useState<any[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<{ [blockId: string]: string }>({});
+  const [answers, setAnswers] = useState<Record<string, any>>({});
   const [startTime, setStartTime] = useState<number | null>(null);
   const [endTime, setEndTime] = useState<number | null>(null);
   const [timer, setTimer] = useState(selectedDuration * 60);
@@ -341,6 +341,19 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
   const [userSequenceOrder, setUserSequenceOrder] = useState<string[]>([]);
   const [showUserSequence, setShowUserSequence] = useState(false);
   const [allBlocksFromNotes, setAllBlocksFromNotes] = useState<Block[]>([]);
+  // Hybrid judging settings (from SettingsDialog)
+  const [hybridJudgingEnabled, setHybridJudgingEnabled] = useState<boolean>(false);
+  const [hybridLow, setHybridLow] = useState<number>(0.65);
+  const [hybridHigh, setHybridHigh] = useState<number>(0.9);
+  const [llmModel, setLlmModel] = useState<string>('');
+  const [llmTemperature, setLlmTemperature] = useState<number>(0.8);
+  const [llmTopP, setLlmTopP] = useState<number>(0.9);
+  const [partialCreditWeight, setPartialCreditWeight] = useState<number>(0.5);
+  const [isGrading, setIsGrading] = useState<boolean>(false);
+  const [gradedResults, setGradedResults] = useState<{ blockId: string; userAnswer: any; correctAnswer: string; isCorrect: boolean }[]>([]);
+  const [finalPercent, setFinalPercent] = useState<number>(0);
+  const [perQuestionLLM, setPerQuestionLLM] = useState<Record<string, boolean>>({});
+  const [testLLMChance, setTestLLMChance] = useState<number>(0.5);
 
   // Load all notes for selection if not provided
   useEffect(() => {
@@ -352,6 +365,35 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
       setAllNotes(availableNotes);
     }
   }, [availableNotes]);
+
+  // Load hybrid judging and LLM settings
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const hj = window.localStorage.getItem('testHybridJudging');
+      const low = window.localStorage.getItem('testHybridLow');
+      const high = window.localStorage.getItem('testHybridHigh');
+      const model = window.localStorage.getItem('llmModel');
+      const temp = window.localStorage.getItem('llmTemperature');
+      const topP = window.localStorage.getItem('llmTopP');
+      const partialW = window.localStorage.getItem('testPartialWeight') || window.localStorage.getItem('quizPartialWeight');
+      const llmChance = window.localStorage.getItem('testLLMChance');
+      if (hj != null) setHybridJudgingEnabled(hj === 'true');
+      if (low != null) setHybridLow(Number(low));
+      if (high != null) setHybridHigh(Number(high));
+      if (model) setLlmModel(model);
+      if (temp) setLlmTemperature(Number(temp));
+      if (topP) setLlmTopP(Number(topP));
+      if (partialW) {
+        const w = Number(partialW);
+        if (!Number.isNaN(w) && w >= 0 && w <= 1) setPartialCreditWeight(w);
+      }
+      if (llmChance != null) {
+        const c = Number(llmChance);
+        if (!Number.isNaN(c) && c >= 0 && c <= 1) setTestLLMChance(c);
+      }
+    } catch { }
+  }, []);
 
   // Fetch previous test score for the selected context
   useEffect(() => {
@@ -413,6 +455,18 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
     const allBlocksFromNotes = uniqueNotes.flatMap(n => n.blocks);
     // Generate questions using quizview logic
     let testQuestions = generateQuizQuestions(uniqueNotes);
+    // Assign per-question LLM judging based on chance if hybrid is enabled
+    const perLLM: Record<string, boolean> = {};
+    if (testQuestions && testQuestions.length > 0) {
+      testQuestions.forEach((q: any) => {
+        if (hybridJudgingEnabled && q.type !== 'sequence') {
+          perLLM[q.id] = Math.random() < testLLMChance;
+        } else {
+          perLLM[q.id] = false;
+        }
+      });
+    }
+    setPerQuestionLLM(perLLM);
     setQuestions(testQuestions);
     setAllBlocksFromNotes(allBlocksFromNotes);
   }
@@ -463,27 +517,65 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
       setAnswers(a => ({ ...a, [q.id]: sequenceOrder }));
     }
     setEndTime(Date.now());
-    setStep("summary");
-    // For MVP: simple grading (compare to q.answer for all types)
-    let correct = 0;
-    const graded = questions.map(q => {
+
+    // Perform grading (hybrid if enabled)
+    setIsGrading(true);
+    let numericScore = 0;
+    const graded = await Promise.all(questions.map(async (q) => {
       let isCorrect = false;
-      const userAnswer = answers[q.id] || "";
-      if (q.type === "sequence") {
-        // Ensure userAnswer is an array for sequence questions
+      const userAnswer = answers[q.id] ?? "";
+      if (q.type === 'sequence') {
         isCorrect = Array.isArray(userAnswer) && arraysEqual(userAnswer, q.sequence);
-      } else {
-        isCorrect = typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+        if (isCorrect) numericScore += 1;
+        return { blockId: q.id, userAnswer, correctAnswer: q.answer, isCorrect };
       }
-      if (isCorrect) correct++;
-      return {
-        blockId: q.id,
-        userAnswer,
-        correctAnswer: q.answer,
-        isCorrect,
-      };
-    });
-    // If testing a folder, store folderId; if a note, store noteId
+      // Non-sequence questions
+      const correctAnswer = q.answer || '';
+      if (!hybridJudgingEnabled || !perQuestionLLM[q.id]) {
+        isCorrect = typeof userAnswer === 'string' && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase();
+        if (isCorrect) numericScore += 1;
+        return { blockId: q.id, userAnswer, correctAnswer, isCorrect };
+      }
+      // Hybrid judging via Electron IPC
+      // @ts-ignore
+      const canIPC = typeof window !== 'undefined' && window?.electronAPI?.gradeAnswer;
+      if (!canIPC) {
+        isCorrect = typeof userAnswer === 'string' && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase();
+        if (isCorrect) numericScore += 1;
+        return { blockId: q.id, userAnswer, correctAnswer, isCorrect };
+      }
+      try {
+        // @ts-ignore
+        const modelToUse = (llmModel && llmModel.trim().length > 0) ? llmModel : (window.localStorage.getItem('llmModel') || 'llama3:latest');
+        // @ts-ignore
+        const res = await window.electronAPI.gradeAnswer({
+          userAnswer: String(userAnswer || ''),
+          correctAnswer: String(correctAnswer || ''),
+          low: hybridLow,
+          high: hybridHigh,
+          model: modelToUse,
+          temperature: llmTemperature,
+          top_p: llmTopP,
+        });
+        if (res?.success) {
+          if (res.decision === 'correct') { numericScore += 1; isCorrect = true; }
+          else if (res.decision === 'partial') { numericScore += partialCreditWeight; isCorrect = false; }
+          else { isCorrect = false; }
+        } else {
+          // Fallback exact match on error
+          isCorrect = typeof userAnswer === 'string' && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase();
+          if (isCorrect) numericScore += 1;
+        }
+      } catch (e) {
+        isCorrect = typeof userAnswer === 'string' && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase();
+        if (isCorrect) numericScore += 1;
+      }
+      return { blockId: q.id, userAnswer, correctAnswer, isCorrect };
+    }));
+
+    const percent = questions.length ? Math.round((numericScore / questions.length) * 100) : 0;
+    setGradedResults(graded);
+    setFinalPercent(percent);
     const session: TestSession = {
       id: `test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       noteId: selectedNoteIds.join(","),
@@ -492,9 +584,11 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
       endTime: Date.now(),
       duration: selectedDuration * 60,
       questions: graded,
-      score: questions.length ? Math.round((correct / questions.length) * 100) : 0,
+      score: percent,
     };
     await saveTestSession(session);
+    setIsGrading(false);
+    setStep("summary");
   };
 
   // After test completion, update previousScore
@@ -752,7 +846,7 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">Question {currentIdx + 1} of {questions.length}</CardTitle>
-                {q.type === "true/false" && <Badge variant="outline">True/False</Badge>}
+                {(q.type === "true/false" || q.type === "true-false") && <Badge variant="outline">True/False</Badge>}
               </div>
             </CardHeader>
             <CardContent>
@@ -769,27 +863,39 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
                   </div>
                 )}
               </div>
-              <RadioGroup value={answers[q.id] || ""} onValueChange={val => handleAnswer(q.id, val)} className="space-y-3">
-                {options.map((option: string, idx: number) => (
-                  <div
-                    key={idx}
-                    className={`flex items-center space-x-2 rounded-lg border p-3 ${answers[q.id] === option ? "border-green-500 bg-green-50 dark:bg-green-900/20" : ""}`}
-                  >
-                    <RadioGroupItem value={option} id={`option-${idx}`} />
-                    <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer">
-                      {option.startsWith('data:image') ? (
-                        <img
-                          src={option}
-                          alt="Option"
-                          className="max-h-16 rounded-md"
-                        />
-                      ) : (
-                        renderMathOrText({ option, math: 'math' in q ? q.math : false })
-                      )}
-                    </Label>
-                  </div>
-                ))}
-              </RadioGroup>
+              {hybridJudgingEnabled && perQuestionLLM[q.id] ? (
+                <div className="space-y-3">
+                  <label className="text-sm text-muted-foreground">Type your answer</label>
+                  <Textarea
+                    value={answers[q.id] || ""}
+                    onChange={(e) => handleAnswer(q.id, e.target.value)}
+                    placeholder="Your answer"
+                    className="min-h-[100px]"
+                  />
+                </div>
+              ) : (
+                <RadioGroup value={answers[q.id] || ""} onValueChange={val => handleAnswer(q.id, val)} className="space-y-3">
+                  {options.map((option: string, idx: number) => (
+                    <div
+                      key={idx}
+                      className={`flex items-center space-x-2 rounded-lg border p-3 ${answers[q.id] === option ? "border-green-500 bg-green-50 dark:bg-green-900/20" : ""}`}
+                    >
+                      <RadioGroupItem value={option} id={`option-${idx}`} />
+                      <Label htmlFor={`option-${idx}`} className="flex-1 cursor-pointer">
+                        {option.startsWith('data:image') ? (
+                          <img
+                            src={option}
+                            alt="Option"
+                            className="max-h-16 rounded-md"
+                          />
+                        ) : (
+                          renderMathOrText({ option, math: 'math' in q ? q.math : false })
+                        )}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              )}
               {'answerImage' in q && answers[q.id] && q.answerImage && (
                 <div className="mt-4 flex justify-center">
                   <img
@@ -803,9 +909,13 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
             <CardFooter className="flex justify-between items-center gap-2">
               <Button variant="outline" onClick={handlePrev} disabled={currentIdx === 0}>Previous</Button>
               {currentIdx < questions.length - 1 ? (
-                <Button onClick={handleNext} className="ml-auto" disabled={!answers[q.id]}>Next</Button>
+                <Button onClick={handleNext} className="ml-auto" disabled={!answers[q.id] || isGrading}>
+                  Next
+                </Button>
               ) : (
-                <Button onClick={handleSubmit} className="ml-auto" disabled={autoSubmitted || !answers[q.id]}>Submit</Button>
+                <Button onClick={handleSubmit} className="ml-auto" disabled={autoSubmitted || !answers[q.id] || isGrading}>
+                  {isGrading ? (<span className="inline-flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Grading…</span>) : 'Submit'}
+                </Button>
               )}
             </CardFooter>
           </Card>
@@ -834,33 +944,40 @@ export default function TestView({ availableFolders, availableNotes = [], onTest
 
   // Summary
   if (step === "summary") {
-    const correct = questions.filter((q, i) => {
-      const userAnswer = answers[q.id] || "";
-      if (q.type === "sequence") {
-        return Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence);
-      } else {
-        return typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
-      }
-    }).length;
+    const correct = hybridJudgingEnabled
+      ? gradedResults.filter(r => r.isCorrect).length
+      : questions.filter((q, i) => {
+        const userAnswer = answers[q.id] || "";
+        if (q.type === "sequence") {
+          return Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence);
+        } else {
+          return typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+        }
+      }).length;
+    const percent = hybridJudgingEnabled
+      ? finalPercent
+      : (questions.length ? Math.round((correct / questions.length) * 100) : 0);
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-6">
         <div className="bg-white dark:bg-gray-900 rounded-lg shadow-lg p-8 w-full max-w-2xl flex flex-col items-center">
           <div className="mb-4 text-3xl font-bold text-green-600 flex items-center gap-2">
             <CheckCircle className="w-8 h-8" /> Test Complete!
           </div>
-          <div className="mb-2 text-xl font-semibold">Score: <span className="text-blue-600">{correct} / {questions.length}</span> <span className="text-gray-500">({questions.length ? Math.round((correct / questions.length) * 100) : 0}%)</span></div>
+          <div className="mb-2 text-xl font-semibold">Score: <span className="text-blue-600">{correct} / {questions.length}</span> <span className="text-gray-500">({percent}%)</span></div>
           <div className="w-full mt-6 overflow-y-auto max-h-96">
             <div className="mb-2 font-medium text-gray-700 dark:text-gray-200">Question Review</div>
             <ul className="space-y-2">
               {questions.map((q, i) => {
                 const userAnswer = answers[q.id] || "";
-                const isCorrect = q.type === "sequence"
-                  ? Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence)
-                  : typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || "");
+                const isCorrect = hybridJudgingEnabled
+                  ? (gradedResults.find(r => r.blockId === q.id)?.isCorrect ?? false)
+                  : (q.type === "sequence"
+                    ? Array.isArray(userAnswer) && JSON.stringify(userAnswer) === JSON.stringify(q.sequence)
+                    : typeof userAnswer === "string" && userAnswer.trim().toLowerCase() === (q.answer?.trim().toLowerCase() || ""));
                 return (
                   <li key={q.id} className={`border rounded p-3 flex items-center gap-3 ${isCorrect ? "border-green-400 bg-green-50 dark:bg-green-900/10" : "border-red-400 bg-red-50 dark:bg-red-900/10"}`}>
                     <span className="font-bold">Q{i + 1}.</span>
-                    <span className="flex-1">{q.content}</span>
+                    <span className="flex-1">{'question' in q ? q.question : q.content}</span>
                     <span className={isCorrect ? "text-green-600" : "text-red-600"}>{isCorrect ? <Check className="w-5 h-5" /> : <X className="w-5 h-5" />}</span>
                   </li>
                 );

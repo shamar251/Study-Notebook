@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveFile: (data: { content: string; filePath?: string }) => ipcRenderer.invoke("save-file", data),
   openFile: () => ipcRenderer.invoke("open-file"),
   ragQuery: (args: any) => ipcRenderer.invoke("rag-query", args),
+  gradeAnswer: (args: any) => ipcRenderer.invoke('quiz-grade', args),
+  hint: (args: any) => ipcRenderer.invoke('quiz-hint', args),
+  log: (payload: any) => ipcRenderer.invoke('log', payload),
 })
 
 // Add TypeScript interface for window object
@@ -19,6 +22,9 @@ declare global {
       }>
       openFile: () => Promise<{ success: boolean; content?: string; filePath?: string; message?: string }>
       ragQuery: (args: any) => Promise<any>;
+      gradeAnswer: (args: any) => Promise<any>;
+      hint: (args: any) => Promise<any>;
+      log: (payload: any) => Promise<any>;
     }
   }
 }

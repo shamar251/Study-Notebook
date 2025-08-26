@@ -1,13 +1,14 @@
 // OpenAI and Qdrant embedding/search utility (scaffold)
 import * as axios from 'axios'; // Make sure to install axios: npm install axios @types/axios
+import { upsertLocalVector, searchLocalVectors } from './localVectorStore';
 
 // Embedding provider selection
 const EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER || 'ollama'; // 'ollama' or 'openai'
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
-// Hard-coded Qdrant config for production
-const QDRANT_URL = "https://39d385fd-d382-4626-88ff-3e30f74825bc.us-east4-0.gcp.cloud.qdrant.io:6333";
-const QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.koHi2gFKW1KyzGSdB4JI3NplNK1em0iIeKDfKdhMjsk";
+// Deprecated: Qdrant config (kept for backward compatibility but unused now)
+const QDRANT_URL = "";
+const QDRANT_API_KEY = "";
 
 // Validate OpenAI env only if using OpenAI
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -105,27 +106,8 @@ export async function upsertQdrantVector({
   payload: any;
   collection?: string;
 }) {
-  try {
-    const headers = QDRANT_API_KEY ? { 'api-key': QDRANT_API_KEY } : undefined;
-    console.log(`[upsertQdrantVector] Upserting vector to Qdrant collection: ${collection}, id: ${id}`);
-    console.log('[upsertQdrantVector] Qdrant endpoint:', `${QDRANT_URL}/collections/${collection}/points`);
-    console.log('[upsertQdrantVector] Qdrant headers:', headers);
-    await axios.put(`${QDRANT_URL}/collections/${collection}/points`, {
-      points: [
-        {
-          id,
-          vector: embedding,
-          payload,
-        },
-      ],
-    }, {
-      headers
-    });
-    console.log('[upsertQdrantVector] Upsert successful.');
-  } catch (error: any) {
-    console.error('[upsertQdrantVector] Error upserting vector to Qdrant:', error?.response?.data || error.message || error);
-    throw new Error('Failed to upsert vector to Qdrant.');
-  }
+  // Redirect to local vector store
+  upsertLocalVector({ id, vector: embedding, payload }, collection);
 }
 
 export async function searchQdrant({
@@ -139,25 +121,7 @@ export async function searchQdrant({
   topK?: number;
   collection?: string;
 }) {
-  try {
-    const headers = QDRANT_API_KEY ? { 'api-key': QDRANT_API_KEY } : undefined;
-    console.log(`[searchQdrant] Searching Qdrant collection: ${collection}, topK: ${topK}`);
-    console.log('[searchQdrant] Qdrant endpoint:', `${QDRANT_URL}/collections/${collection}/points/search`);
-    console.log('[searchQdrant] Qdrant headers:', headers);
-    const response = await axios.post<{
-      result: any[];
-    }>(`${QDRANT_URL}/collections/${collection}/points/search`, {
-      vector: queryEmbedding,
-      filter,
-      limit: topK,
-      with_payload: true,
-    }, {
-      headers
-    });
-    console.log('[searchQdrant] Search successful. Results:', response.data.result?.length || 0);
-    return response.data.result;
-  } catch (error: any) {
-    console.error('[searchQdrant] Error searching Qdrant:', error?.response?.data || error.message || error);
-    throw new Error('Failed to search Qdrant.');
-  }
+  // Redirect to local vector store with cosine similarity
+  const results = searchLocalVectors(queryEmbedding, { filter, topK, collection });
+  return results;
 } 

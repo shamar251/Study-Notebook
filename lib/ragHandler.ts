@@ -104,6 +104,29 @@ function blockToFactLine(block: Block | undefined, allBlocks: Block[]): string {
   }
 }
 
+function normalizeLine(text: string): string {
+  if (!text) return '';
+  // Collapse whitespace, trim, remove duplicate separators
+  let t = text.replace(/\s+/g, ' ').trim();
+  t = t.replace(/\s*\|\s*/g, ' | ');
+  // Limit length to keep lines concise
+  const MAX_LEN = 200;
+  if (t.length > MAX_LEN) t = t.slice(0, MAX_LEN - 3) + '...';
+  return t;
+}
+
+function buildMetaSummary(entities: string[], notes: string[], summaries: string[]): string[] {
+  const bullets: string[] = [];
+  const primaryEntities = entities.slice(0, 5).map(e => e.replace(/^Entity:\s*/i, '').split('|')[0].trim());
+  const coreNotes = notes.slice(0, 3).map(n => n.replace(/^Note:\s*/i, '').trim());
+  const summarySnippet = summaries[0] ? summaries[0].replace(/^Note Summary:\s*/i, '').replace(/^Note:\s*/i, '').trim() : '';
+  bullets.push('TL;DR:');
+  if (primaryEntities.length > 0) bullets.push(`- Entities: ${primaryEntities.join(', ')}`);
+  if (coreNotes.length > 0) bullets.push(`- Themes: ${coreNotes.join(' · ')}`);
+  if (summarySnippet) bullets.push(`- Summary: ${summarySnippet}`);
+  return bullets;
+}
+
 function logToFile(message: any) {
   const logDir = path.join(process.cwd(), 'logs');
   if (!fs.existsSync(logDir)) {
@@ -182,14 +205,18 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
     // Retry logic can be added here if embedding is implemented
   }
 
-  // 4. Deduplicate results by id only (less aggressive)
-  const seen = new Set<string>();
-  const dedupedResults = allResults.filter((r: QdrantResult) => {
-    const key = r.id;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  // 4. Deduplicate and consolidate results by blockId/content
+  type Consolidated = { id: string; payload?: QdrantResult['payload']; score: number };
+  const byBlock: Map<string, Consolidated> = new Map();
+  for (const r of allResults) {
+    const blockKey = r.payload?.blockId || r.payload?.content || r.id;
+    const current = byBlock.get(blockKey);
+    const score = typeof r.score === 'number' ? r.score : 0;
+    if (!current || score > current.score) {
+      byBlock.set(blockKey, { id: r.id, payload: r.payload, score });
+    }
+  }
+  const dedupedResults: QdrantResult[] = Array.from(byBlock.values()).map(v => ({ id: v.id, payload: v.payload, score: v.score }));
   const t3 = Date.now();
   // logToFile(`[TIMING] Deduplication: ${t3 - t2}ms`);
   // Log dedupedResults after deduplication
@@ -239,47 +266,80 @@ export async function runRagPipeline({ note_id, query, topK = 10, allBlocks, fol
   const blockTypesInContext = dedupedResults.map(r => r.payload?.type).filter(Boolean);
   // logToFile('Block types in context:');
 
-  // Optimize for speed
-  const SPEED_TOP_K = 10;
+  // Optimize for speed and organization (Entities / Notes / Summaries + TL;DR)
   const SPEED_MAX_CONTEXT_CHARS = 16000;
-  // Only use the top 30 results by score
-  const sortedResults = allResults.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, SPEED_TOP_K);
-
-  const instructions = `You are a helpful study assistant. Use ONLY the following note data to answer the user's question.\nIf the answer is not in the context, say \"I don't know.\"\nDo NOT show your reasoning, thoughts, explanations, or process—output ONLY the final answer.\nIf the question asks for a summary, provide a concise summary as a bullet list.\nOtherwise, answer the question as directly as possible using the facts below.\nDo NOT include any text like <think>, \"Step\", \"Let me think\", or similar. Output ONLY the answer.\nUnder NO circumstances should you output your reasoning, thoughts, process, or any meta-commentary. Your answer must be ONLY the final answer or summary, with no preamble, no steps, and no explanations.`;
   const MAX_CONTEXT_CHARS = SPEED_MAX_CONTEXT_CHARS;
-  let contextFacts: string[] = [];
-  let currentLength = 0;
-  let truncated = false;
-  const factSet = new Set<string>();
-  for (const r of sortedResults) {
-    const fact = r.payload && r.payload.blockId
-      ? blockToFactLine(allBlocks.find((b: Block) => b.id === r.payload!.blockId), allBlocks)
-      : `${r.payload?.type}: ${r.payload?.content || ''}`;
-    if (!fact || factSet.has(fact)) continue; // Skip duplicates
-    if (currentLength + fact.length > MAX_CONTEXT_CHARS) {
-      truncated = true;
-      break;
+  const sortedDeduped = dedupedResults.slice().sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 40);
+
+  const entitiesCons: Consolidated[] = [];
+  const notesCons: Consolidated[] = [];
+  const summariesCons: Consolidated[] = [];
+
+  const summaryRegex = /\b(summary|overview|main point|key points)\b/i;
+  for (const r of sortedDeduped) {
+    const t = r.payload?.type || '';
+    const cons: Consolidated = { id: r.id, payload: r.payload, score: r.score || 0 };
+    if (t === 'who' || t === 'what') {
+      entitiesCons.push(cons);
+    } else if (t === 'note') {
+      const content = r.payload?.content || '';
+      if (summaryRegex.test(content)) summariesCons.push(cons); else notesCons.push(cons);
     }
-    contextFacts.push(fact);
-    factSet.add(fact);
-    currentLength += fact.length + 1;
-    console.log('[RAG DEBUG] Added fact to contextFacts:', fact);
   }
-  if (truncated) {
-    console.warn(`[RAG] Context truncated to ${MAX_CONTEXT_CHARS} characters. Some facts omitted.`);
+
+  function toLines(items: Consolidated[], limit: number): string[] {
+    const lines: string[] = [];
+    const seenFacts = new Set<string>();
+    for (const r of items.slice(0, limit)) {
+      const lineRaw = r.payload && r.payload.blockId
+        ? blockToFactLine(allBlocks.find((b: Block) => b.id === r.payload!.blockId), allBlocks)
+        : `${r.payload?.type}: ${r.payload?.content || ''}`;
+      const line = normalizeLine(lineRaw);
+      if (!line || seenFacts.has(line)) continue;
+      seenFacts.add(line);
+      lines.push(line);
+    }
+    return lines;
   }
-  // --- Sandwich/hybrid context: summary/title, truncated full note, then top Qdrant facts ---
-  const hybridContextFacts = [...parentContextLines, ...contextFacts];
+
+  const entitiesLines = toLines(entitiesCons, 10);
+  const notesLines = toLines(notesCons, 8);
+  const summariesLines = toLines(summariesCons, 5);
+
+  const header = parentContextLines;
+  const tldr = buildMetaSummary(entitiesLines, notesLines, summariesLines);
+
+  const grouped: { title: string; lines: string[] }[] = [];
+  if (entitiesLines.length) grouped.push({ title: 'Entities', lines: entitiesLines });
+  if (notesLines.length) grouped.push({ title: 'Notes', lines: notesLines });
+  if (summariesLines.length) grouped.push({ title: 'Summaries', lines: summariesLines });
+
+  const assembled: string[] = [...tldr, ...header];
+  let used = assembled.join('\n').length;
+  for (const section of grouped) {
+    const sectionHeader = `\n${section.title}:`;
+    if (used + sectionHeader.length > MAX_CONTEXT_CHARS) break;
+    assembled.push(sectionHeader);
+    used += sectionHeader.length;
+    for (const line of section.lines) {
+      if (used + line.length + 1 > MAX_CONTEXT_CHARS) break;
+      assembled.push(line);
+      used += line.length + 1;
+    }
+  }
+
+  const hybridContextFacts = assembled;
+  const instructions = `You are a helpful study assistant. Use ONLY the context below to answer the question. If the answer is not present, reply with "I don't know." Output only the answer (or a concise summary when asked), no reasoning or steps.`;
 
   console.log(`[RAG] Number of facts included in LLM context: ${hybridContextFacts.length}`);
   console.log('[RAG] Facts included in LLM context:', hybridContextFacts);
   console.log(`[RAG] Current LLM Model: ${model}`);
   // 7. Collect fact details for debugging/logging/return
-  const factDetails = hybridContextFacts.map((fact, idx) => ({
+  const factDetails = hybridContextFacts.map((fact) => ({
     fact,
-    score: dedupedResults[idx]?.score ?? null,
-    blockId: dedupedResults[idx]?.payload?.blockId ?? null,
-    content: dedupedResults[idx]?.payload?.content ?? null,
+    score: null,
+    blockId: null,
+    content: null,
   }));
   // logToFile('Facts and Qdrant scores used in context:');
   factDetails.forEach((f, i) => {

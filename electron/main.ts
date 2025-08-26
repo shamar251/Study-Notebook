@@ -4,6 +4,53 @@ import * as fs from "fs"
 import { spawn, ChildProcess } from 'child_process';
 const serve = require("electron-serve")
 const { runRagPipeline } = require("./lib/ragHandler.js");
+const pathToEmbed = path.join(__dirname, "../lib/brain/processors/embed.js");
+let getEmbedding: ((text: string, model?: string, maxRetries?: number) => Promise<number[]>) | null = null;
+try {
+  // Lazy require to avoid startup failures if file structure differs in dev vs prod
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const embedMod = require(pathToEmbed);
+  getEmbedding = embedMod?.getEmbedding || null;
+} catch (e) {
+  getEmbedding = null;
+}
+
+async function getEmbeddingViaHttp(text: string, model = 'nomic-embed-text'): Promise<number[]> {
+  return new Promise((resolve, reject) => {
+    try {
+      const http = require('http');
+      const https = require('https');
+      const url = new URL('http://localhost:11434/api/embeddings');
+      const isHttps = url.protocol === 'https:';
+      const reqModule = isHttps ? https : http;
+      const body = JSON.stringify({ model, prompt: text });
+      const req = reqModule.request({
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+      }, (res2: any) => {
+        let data = '';
+        res2.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        res2.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            if (json && Array.isArray(json.embedding)) return resolve(json.embedding as number[]);
+            reject(new Error('No embedding in response'));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+      req.on('error', (err: any) => reject(err));
+      req.write(body);
+      req.end();
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
 
 // Determine if we're in development or production
 const isDev = process.env.NODE_ENV === "development"
@@ -238,30 +285,7 @@ electronApp.whenReady().then(async () => {
   await ensureOllamaRunning();
 
   // Start Express API server if not already running
-  if (!(await isPortInUse(3001))) {
-    let serverPath;
-    if (electronApp.isPackaged) {
-      serverPath = path.join(electronApp.getAppPath(), 'server.js');
-    } else {
-      serverPath = path.join(process.cwd(), 'server.js');
-    }
-    console.log('[Electron] Spawning server.js at:', serverPath);
-    apiProcess = spawn('node', [serverPath], {
-      stdio: 'inherit',
-      shell: true,
-    });
-    apiProcess?.on('error', (err: any) => {
-      console.error('[Electron] API server process error:', err);
-    });
-    apiProcess?.on('exit', (code: number, signal: string) => {
-      console.log(`[Electron] API server exited with code ${code}, signal ${signal}`);
-    });
-  } else {
-    console.log('[Electron] API server already running on port 3001.');
-  }
-
-  // Wait for server to be ready before loading frontend
-  await waitForServerReady(3001);
+  // Not using a separate Express server.js; renderer will call Next.js or IPC directly
 
   createWindow();
 
@@ -360,5 +384,208 @@ ipcMain.handle('rag-query', async (_event, { note_id, query, allBlocks, topK = 1
   } catch (error) {
     console.error('RAG error:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB) || 1e-12;
+  return dot / denom;
+}
+
+async function judgeWithLLM({ userAnswer, correctAnswer, model, temperature, top_p }: { userAnswer: string; correctAnswer: string; model: string; temperature?: number; top_p?: number; }): Promise<{ decision: 'correct' | 'partial' | 'incorrect'; raw: string }> {
+  const prompt = `You are an expert grading assistant. Determine if the student's answer has the same meaning as the correct answer, allowing for paraphrasing.\n\nStudent answer: "${userAnswer}"\nCorrect answer: "${correctAnswer}"\n\nReply with exactly one of the following words:\n- Correct\n- Partially Correct\n- Incorrect`;
+
+  const http = require('http');
+  const https = require('https');
+  const url = new URL('http://localhost:11434/api/generate');
+  const isHttps = url.protocol === 'https:';
+  const reqModule = isHttps ? https : http;
+  const postData = JSON.stringify({
+    model: model || 'llama3:latest',
+    prompt,
+    options: {
+      temperature: typeof temperature === 'number' ? temperature : 0,
+      top_p: typeof top_p === 'number' ? top_p : 0.9,
+    },
+  });
+
+  let raw = '';
+  const dataStr: string = await new Promise((resolve, reject) => {
+    const req = reqModule.request({
+      hostname: url.hostname,
+      port: url.port || (isHttps ? 443 : 80),
+      path: url.pathname,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+    }, (res2: any) => {
+      let buffer = '';
+      res2.on('data', (chunk: Buffer) => {
+        buffer += chunk.toString();
+        let lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+            if (data.response) raw += data.response;
+            if (data.done) {
+              resolve(raw.trim());
+              return;
+            }
+          } catch { /* ignore */ }
+        }
+      });
+      res2.on('end', () => resolve(raw.trim()));
+    });
+    req.on('error', (err: any) => reject(err));
+    req.write(postData);
+    req.end();
+  });
+  raw = dataStr || '';
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('partially')) return { decision: 'partial', raw };
+  if (normalized.includes('incorrect')) return { decision: 'incorrect', raw };
+  if (normalized.includes('correct')) return { decision: 'correct', raw };
+  return { decision: 'partial', raw };
+}
+
+ipcMain.handle('quiz-grade', async (_event, { userAnswer, correctAnswer, low = 0.65, high = 0.9, model, temperature, top_p }) => {
+  try {
+    console.log('[QUIZ-GRADE] incoming', { userAnswer, correctAnswer, low, high, model, temperature, top_p });
+    if (typeof userAnswer !== 'string' || typeof correctAnswer !== 'string') {
+      return { success: false, error: 'userAnswer and correctAnswer must be strings' };
+    }
+    const embeddingModel = 'nomic-embed-text';
+    const [uEmb, cEmb] = await Promise.all([
+      (getEmbedding ? getEmbedding(userAnswer, embeddingModel) : getEmbeddingViaHttp(userAnswer, embeddingModel)),
+      (getEmbedding ? getEmbedding(correctAnswer, embeddingModel) : getEmbeddingViaHttp(correctAnswer, embeddingModel)),
+    ]);
+    const cosine = cosineSimilarity(uEmb, cEmb);
+    console.log('[QUIZ-GRADE] cosine', cosine);
+    if (cosine >= high) {
+      console.log('[QUIZ-GRADE] decision by cosine: correct');
+      return { success: true, decision: 'correct', cosine };
+    }
+    if (cosine <= low) {
+      console.log('[QUIZ-GRADE] decision by cosine: incorrect');
+      return { success: true, decision: 'incorrect', cosine };
+    }
+    const judged = await judgeWithLLM({ userAnswer, correctAnswer, model, temperature, top_p });
+    console.log('[QUIZ-GRADE] decision by LLM:', judged.decision);
+    return { success: true, decision: judged.decision, cosine, raw: judged.raw };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error('[QUIZ-GRADE] error', msg);
+    return { success: false, error: msg };
+  }
+});
+
+// Generate an LLM-based hint for the current question
+ipcMain.handle('quiz-hint', async (_event, { question, options, correctAnswer, model, temperature, top_p }) => {
+  try {
+    const http = require('http');
+    const https = require('https');
+    const url = new URL('http://localhost:11434/api/generate');
+    const isHttps = url.protocol === 'https:';
+    const reqModule = isHttps ? https : http;
+
+    const optsText = Array.isArray(options) && options.length > 0
+      ? `\nOptions: ${options.map((o: string, i: number) => `(${i + 1}) ${o}`).join(' ')}`
+      : '';
+
+    const noRevealLine = 'Do NOT reveal or state the exact answer. Never output the exact solution word or phrase.';
+    const correctGuard = typeof correctAnswer === 'string' && correctAnswer.trim().length > 0
+      ? `\nThe correct answer is known to you for evaluation but you must not reveal it: [REDACTED]. ${noRevealLine}`
+      : `\n${noRevealLine}`;
+
+    const prompt = `You are a supportive tutor. Provide a single, concise hint (1-2 sentences) to help a student answer this quiz question without giving the answer away.${correctGuard}\nFocus on the key concept or a way to eliminate distractors.${optsText}\n\nQuestion: ${question}\n\nHint:`;
+
+    const postData = JSON.stringify({
+      model: model || 'llama3:latest',
+      prompt,
+      options: {
+        temperature: typeof temperature === 'number' ? temperature : 0.7,
+        top_p: typeof top_p === 'number' ? top_p : 0.9,
+      },
+    });
+
+    const hint: string = await new Promise((resolve, reject) => {
+      let acc = '';
+      const req = reqModule.request({
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+      }, (res2: any) => {
+        let buffer = '';
+        res2.on('data', (chunk: Buffer) => {
+          buffer += chunk.toString();
+          let lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          for (const line of lines) {
+            try {
+              const data = JSON.parse(line);
+              if (data.response) acc += data.response;
+              if (data.done) { resolve(acc.trim()); return; }
+            } catch { /* ignore streaming parse errors */ }
+          }
+        });
+        res2.on('end', () => resolve(acc.trim()));
+      });
+      req.on('error', (err: any) => reject(err));
+      req.write(postData);
+      req.end();
+    });
+
+    function sanitizeHint(raw: string, answer: string): string {
+      let out = (raw || '').replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1');
+      out = out.replace(/^(hint[:\-\s]*)/i, '').trim();
+      // Limit to 1–2 sentences
+      const parts = out.split(/(?<=[.!?])\s+/).slice(0, 2);
+      out = parts.join(' ').trim();
+      // Mask the exact answer if present (case/space-insensitive)
+      const ans = (answer || '').trim();
+      if (ans.length > 0) {
+        const escaped = ans.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+        const re = new RegExp(escaped, 'ig');
+        out = out.replace(re, '____');
+        if (/^(true|false)$/i.test(ans)) {
+          out = out.replace(/\btrue\b/ig, '____').replace(/\bfalse\b/ig, '____');
+        }
+      }
+      // Final guard phrases
+      out = out.replace(/\b(the\s+answer\s+is|it\s+is)\b[^.?!]*/ig, '').trim();
+      if (!out) out = 'Focus on the underlying concept and how it applies; eliminate clearly incorrect choices.';
+      return out.slice(0, 240);
+    }
+
+    const cleaned = sanitizeHint(hint, correctAnswer);
+    return { success: true, hint: cleaned };
+  } catch (e: any) {
+    return { success: false, error: e?.message || String(e) };
+  }
+});
+
+// Simple logging bridge from renderer -> main (so logs show in terminal)
+ipcMain.handle('log', async (_event, payload: any) => {
+  try {
+    if (typeof payload === 'string') {
+      console.log('[RENDERER]', payload);
+    } else {
+      console.log('[RENDERER]', JSON.stringify(payload));
+    }
+    return { ok: true };
+  } catch (e: any) {
+    console.error('[RENDERER][LOG] error', e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
   }
 });

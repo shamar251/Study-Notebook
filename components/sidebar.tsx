@@ -22,6 +22,8 @@ import {
   User, // Add User icon for profile button
   ChevronLeft, // For collapse button
   Bot, // Add Bot icon for semantic agents
+  BookOpen, // Add BookOpen icon for review button
+  Lightbulb, // Add Lightbulb icon for spaced repetition review
 } from "lucide-react"
 import {
   DndContext,
@@ -74,6 +76,8 @@ import { ResizableBox } from 'react-resizable';
 import 'react-resizable/css/styles.css';
 import Link from "next/link"
 
+
+
 interface SidebarProps {
   folders: Folder[]
   notes: Note[]
@@ -102,6 +106,7 @@ interface SidebarProps {
   permanentDeleteItem: (itemId: string, itemType: 'folder' | 'note') => void
   toggleFavorite: (itemId: string, itemType: 'folder' | 'note') => void
   onSemanticAgentsClick: () => void // <-- add this
+  onReviewClick: () => void // <-- add this
 }
 
 // Custom alphanumeric sort: numbers first, then letters (case-insensitive)
@@ -144,6 +149,7 @@ export default function Sidebar({
   permanentDeleteItem,
   toggleFavorite,
   onSemanticAgentsClick,
+  onReviewClick,
 }: SidebarProps) {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     root: true,
@@ -733,6 +739,17 @@ export default function Sidebar({
               onClick={onSemanticAgentsClick}
             >
               <Bot className="h-6 w-6 ml-1" />
+            </button>
+            {/* Review button */}
+            <button
+              className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground mt-1 pt-2 mt-3"
+              title="Review"
+              aria-label="Review"
+              type="button"
+              style={{ background: 'none', border: 'none', padding: 0 }}
+              onClick={onReviewClick}
+            >
+              <Lightbulb className="h-6 w-6 ml-1" />
             </button>
             {/* Home/Dashboard button */}
             {/* <div

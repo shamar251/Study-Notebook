@@ -29,6 +29,7 @@ import { DndProvider } from 'react-dnd'
 import { HTML5Backend } from 'react-dnd-html5-backend'
 import NoteDashboard from "@/components/note-dashboard";
 import SemanticFolderAgents from "@/components/semantic-folder-agents"
+import ReviewPage from "@/components/review-page"
 
 export type Note = DBNote
 
@@ -41,13 +42,19 @@ export default function NoteApp() {
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
-  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | "semantic-agents" | null>(null);
+  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | "semantic-agents" | "review" | null>(null);
   const [showStudyModeSelector, setShowStudyModeSelector] = useState(false);
-  const [folderNotes, setFolderNotes] = useState<Note[]>([]);
+  const [folderNotes, setFolderNotes] = useState<Note[]>([])
   const { theme, setTheme } = useTheme();
   const [visualizationMode, setVisualizationMode] = useState<'clustered' | 'classic' | 'tree' | 'reactflow'>('clustered');
-  const [testTarget, setTestTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
-  const [quizTarget, setQuizTarget] = useState<{ type: 'note', note: Note } | { type: 'folder', folderId: string } | null>(null);
+  const [testTarget, setTestTarget] = useState<{ type: 'note' | 'folder'; note?: Note; folderId?: string } | null>(null)
+  const [quizTarget, setQuizTarget] = useState<{ type: 'note' | 'folder'; note?: Note; folderId?: string } | null>(null)
+  const [currentStudySession, setCurrentStudySession] = useState<{
+    studyItems: any[];
+    folderName: string;
+    context: 'note' | 'folder' | 'review';
+    returnTo?: string;
+  } | null>(null)
   const [noteTestSession, setNoteTestSession] = useState<any>(null);
   const [isElectron, setIsElectron] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
@@ -55,32 +62,37 @@ export default function NoteApp() {
   useEffect(() => {
     // Initialize database with default data if empty
     const initDb = async () => {
-      await initializeDatabase();
+      try {
+        await initializeDatabase();
 
-      // Load all folders and notes
-      const allFolders = await db.folders.toArray();
-      const allNotes = await db.notes.toArray();
+        // Database should now be ready, load data
+        const allFolders = await db.folders.toArray();
+        const allNotes = await db.notes.toArray();
 
-      setFolders(allFolders);
-      setNotes(allNotes);
+        setFolders(allFolders);
+        setNotes(allNotes);
 
-      // Try to restore last open note
-      const lastOpenNoteId = typeof window !== 'undefined' ? localStorage.getItem('lastOpenNoteId') : null;
-      if (lastOpenNoteId && allNotes.length > 0) {
-        const found = allNotes.find(n => n.id === lastOpenNoteId);
-        if (found) {
-          setActiveNote(found);
-          setView('editor');
-          setShowStudyModeSelector(false);
-        } else {
+        // Try to restore last open note
+        const lastOpenNoteId = typeof window !== 'undefined' ? localStorage.getItem('lastOpenNoteId') : null;
+        if (lastOpenNoteId && allNotes.length > 0) {
+          const found = allNotes.find(n => n.id === lastOpenNoteId);
+          if (found) {
+            setActiveNote(found);
+            setView('editor');
+            setShowStudyModeSelector(false);
+          } else {
+            setActiveNote(allNotes[0]);
+            setView('editor');
+            setShowStudyModeSelector(false);
+          }
+        } else if (allNotes.length > 0) {
           setActiveNote(allNotes[0]);
           setView('editor');
           setShowStudyModeSelector(false);
         }
-      } else if (allNotes.length > 0) {
-        setActiveNote(allNotes[0]);
-        setView('editor');
-        setShowStudyModeSelector(false);
+      } catch (error) {
+        console.error('Database initialization failed:', error);
+        // Continue with app startup even if database fails
       }
     };
 
@@ -136,6 +148,8 @@ export default function NoteApp() {
     };
     loadNotes();
   }, []); // Load notes only on initial mount
+
+
 
   // Add a separate effect to reload notes when needed
   const reloadNotes = async () => {
@@ -356,7 +370,7 @@ export default function NoteApp() {
     // This prevents the infinite update loop
   }
 
-  const selectStudyMode = (mode: "flashcards" | "quiz" | "test", note?: Note, subfolderId?: string) => {
+  const selectStudyMode = (mode: "flashcards" | "quiz" | "test" | "review", note?: Note, subfolderId?: string) => {
     if (note) {
       setActiveNote(note);
       setView(mode);
@@ -368,9 +382,27 @@ export default function NoteApp() {
       }
     } else if (subfolderId) {
       setActiveNote(null);
-      setView(mode);
       setShowStudyModeSelector(false);
       setActiveFolder(subfolderId);
+      setView(mode);
+
+      // If we're starting flashcards, create a study session for context tracking
+      if (mode === 'flashcards') {
+        // Create a study session for this folder
+        const folderName = folders.find(f => f.id === subfolderId)?.name || "Study";
+
+        // Determine context based on current view
+        const context = view === 'review' ? 'review' : 'folder';
+        const returnTo = view === 'review' ? 'review' : 'folder';
+
+        setCurrentStudySession({
+          studyItems: [], // Not used for rendering, just for context
+          folderName,
+          context,
+          returnTo
+        });
+      }
+
       if (mode === "test") {
         setTestTarget({ type: 'folder', folderId: subfolderId });
       } else {
@@ -380,6 +412,7 @@ export default function NoteApp() {
       setActiveNote(null);
       setView(mode);
       setShowStudyModeSelector(false);
+
       if (mode === "test") {
         setTestTarget({ type: 'folder', folderId: activeFolder || "" });
       } else {
@@ -838,9 +871,62 @@ export default function NoteApp() {
     fetchTestSession();
   }, [activeNote]);
 
+  const handleStartReview = async (studyItems: any[], folderName: string) => {
+    console.log('🔄 handleStartReview called with:', { studyItems, folderName, studyItemsCount: studyItems.length });
+
+    // Store the study session data
+    setCurrentStudySession({
+      studyItems,
+      folderName,
+      context: 'review',
+      returnTo: 'review'
+    });
+
+    // Set the view to flashcards
+    setView('flashcards');
+    setActiveNote(null);
+    setShowStudyModeSelector(false);
+    setTestTarget(null);
+    setQuizTarget(null);
+
+    // Also clear activeFolder to ensure proper rendering
+    setActiveFolder(null);
+
+    // If we're studying a specific folder (not "All Folders"), set the activeFolder and update folderNotes
+    if (folderName !== "All Folders" && studyItems.length > 0) {
+      const firstStudyItem = studyItems[0];
+      if (firstStudyItem && firstStudyItem.folderId) {
+        setActiveFolder(firstStudyItem.folderId);
+        console.log('🔄 handleStartReview: Set activeFolder to:', firstStudyItem.folderId);
+
+        // Update folderNotes for this folder
+        const notesInFolder = notes.filter(note => {
+          const isInFolder = note.folderId === firstStudyItem.folderId;
+          const isInSubfolder = folders.some(folder =>
+            folder.parentId === firstStudyItem.folderId && note.folderId === folder.id
+          );
+          return isInFolder || isInSubfolder;
+        });
+        setFolderNotes(notesInFolder);
+        console.log('🔄 handleStartReview: Updated folderNotes with', notesInFolder.length, 'notes');
+      }
+    } else if (folderName === "All Folders") {
+      // For "All Folders", set folderNotes to all notes
+      setFolderNotes(notes);
+      console.log('🔄 handleStartReview: Set folderNotes to all notes:', notes.length);
+    }
+
+    console.log('🔄 handleStartReview: State set to:', {
+      view: 'flashcards',
+      activeNote: null,
+      showStudyModeSelector: false,
+      currentStudySession: { studyItems, folderName }
+    });
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className="flex h-screen overflow-hidden">
+      <div className={`flex h-screen ${view === 'review' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
         <Sidebar
           folders={folders}
           notes={filteredNotes}
@@ -872,8 +958,9 @@ export default function NoteApp() {
           permanentDeleteItem={handlePermanentDelete}
           toggleFavorite={handleToggleFavorite}
           onSemanticAgentsClick={() => { setView('semantic-agents'); setActiveNote(null); setShowStudyModeSelector(false); }}
+          onReviewClick={() => { setView('review'); setActiveNote(null); setShowStudyModeSelector(false); }}
         />
-        <main className="flex-1 flex flex-col overflow-hidden">
+        <main className={`flex-1 flex flex-col ${view === 'review' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
           {activeNote && !showStudyModeSelector && (
             <div className="flex-1 flex flex-col overflow-hidden">
               <Tabs
@@ -950,7 +1037,7 @@ export default function NoteApp() {
                 </TabsContent>
 
                 <TabsContent value="test" className="flex-1 p-0 m-0 h-full overflow-hidden">
-                  {testTarget?.type === 'note' && (
+                  {testTarget?.type === 'note' && testTarget.note && (
                     <TestView
                       availableFolders={folders.map((f) => ({
                         id: f.id,
@@ -989,6 +1076,10 @@ export default function NoteApp() {
                   )}
                 </TabsContent>
 
+                <TabsContent value="review" className="flex-1 p-0 m-0 h-full overflow-hidden">
+                  <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} />
+                </TabsContent>
+
                 <TabsContent value="view" className="flex-1 p-0 m-0 h-full overflow-hidden">
                   <div className="flex items-center gap-2 p-2 ml-2">
                     {/* <label htmlFor="viz-mode" className="text-sm font-medium">Visualization:</label> */}
@@ -1019,74 +1110,125 @@ export default function NoteApp() {
           )}
 
           {/* Folder-level study modes (when activeNote is null but view is set) */}
-          {!activeNote && !showStudyModeSelector && view && ["flashcards", "quiz", "test"].includes(view) && (
-            <div className="flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-2 border-b">
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setView(null);
-                      setShowStudyModeSelector(true);
-                      setTestTarget(null);
-                    }}
-                  >
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    Back to Folder
-                  </Button>
-                  {/* <span className="text-sm font-medium">
+          {(() => {
+            const shouldRender = !activeNote && !showStudyModeSelector && view && ["flashcards", "quiz", "test"].includes(view);
+            console.log('🔄 Render condition check:', {
+              activeNote,
+              showStudyModeSelector,
+              view,
+              shouldRender,
+              currentStudySession: !!currentStudySession,
+              viewType: typeof view,
+              viewValue: view
+            });
+            return shouldRender;
+          })() && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2 border-b">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        // Handle navigation based on study context
+                        if (currentStudySession?.context === 'review') {
+                          setView('review');
+                          setCurrentStudySession(null);
+                        } else if (currentStudySession?.context === 'folder') {
+                          setView(null);
+                          setShowStudyModeSelector(true);
+                          setCurrentStudySession(null);
+                        } else {
+                          // Default fallback
+                          setView(null);
+                          setShowStudyModeSelector(true);
+                        }
+                        setTestTarget(null);
+                      }}
+                    >
+                      <ArrowLeft className="w-4 h-4 mr-2" />
+                      {currentStudySession?.context === 'review' ? 'Back to Review Page' : 'Back to Folder'}
+                    </Button>
+                    {/* <span className="text-sm font-medium">
                     {view === "flashcards" && "Flashcards"}
                     {view === "quiz" && "Quiz"}
                     {view === "test" && "Test"}
                     {activeFolder && ` - ${folders.find(f => f.id === activeFolder)?.name}`}
                   </span> */}
+                  </div>
                 </div>
+
+                {view === "flashcards" && (
+                  <>
+                    {console.log('🔄 Rendering FlashcardView with:', {
+                      currentStudySession: !!currentStudySession,
+                      context: currentStudySession?.context || 'none',
+                      folderName: currentStudySession?.folderName || (folders.find(f => f.id === activeFolder)?.name || "Study"),
+                      notesCount: folderNotes.length,
+                      activeFolder
+                    })}
+                    <FlashcardView
+                      notes={folderNotes}
+                      folderName={currentStudySession ? currentStudySession.folderName : (folders.find(f => f.id === activeFolder)?.name || "Study")}
+                      studyItems={undefined}
+                      onComplete={() => {
+                        // Handle completion for folder-level flashcards
+                        console.log("Folder flashcards completed");
+
+                        // Handle navigation based on study context
+                        if (currentStudySession?.context === 'review') {
+                          setView('review');
+                          setCurrentStudySession(null);
+                        } else if (currentStudySession?.context === 'folder') {
+                          setView(null);
+                          setShowStudyModeSelector(true);
+                          setCurrentStudySession(null);
+                        } else {
+                          // Default fallback
+                          setView(null);
+                          setShowStudyModeSelector(true);
+                        }
+                      }}
+                    />
+                  </>
+                )}
+
+                {view === "quiz" && (
+                  <QuizView
+                    notes={folderNotes}
+                    folderName={folders.find(f => f.id === activeFolder)?.name || "Study"}
+                    onComplete={(noteId, score, total) => {
+                      // Handle completion for folder-level quiz
+                      console.log("Folder quiz completed", { noteId, score, total });
+                    }}
+                  />
+                )}
+
+                {view === "test" && (
+                  <TestView
+                    availableFolders={folders.map((f) => ({
+                      id: f.id,
+                      name: f.name
+                    }))}
+                    availableNotes={notes.map((n) => ({
+                      id: n.id,
+                      title: n.title,
+                      folderId: n.folderId
+                    }))}
+                    defaultFolderId={activeFolder || undefined}
+                    autoStartIfDefault={true}
+                    onTestComplete={async (session) => {
+                      await db.testSessions.add(session)
+                      console.log("Test session saved:", session)
+                    }}
+                  />
+                )}
+
+                {view === "review" && (
+                  <ReviewPage folderId={activeFolder || undefined} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
+                )}
               </div>
-
-              {view === "flashcards" && (
-                <FlashcardView
-                  notes={folderNotes}
-                  folderName={folders.find(f => f.id === activeFolder)?.name || "Study"}
-                  onComplete={() => {
-                    // Handle completion for folder-level flashcards
-                    console.log("Folder flashcards completed");
-                  }}
-                />
-              )}
-
-              {view === "quiz" && (
-                <QuizView
-                  notes={folderNotes}
-                  folderName={folders.find(f => f.id === activeFolder)?.name || "Study"}
-                  onComplete={(noteId, score, total) => {
-                    // Handle completion for folder-level quiz
-                    console.log("Folder quiz completed", { noteId, score, total });
-                  }}
-                />
-              )}
-
-              {view === "test" && (
-                <TestView
-                  availableFolders={folders.map((f) => ({
-                    id: f.id,
-                    name: f.name
-                  }))}
-                  availableNotes={notes.map((n) => ({
-                    id: n.id,
-                    title: n.title,
-                    folderId: n.folderId
-                  }))}
-                  defaultFolderId={activeFolder || undefined}
-                  autoStartIfDefault={true}
-                  onTestComplete={async (session) => {
-                    await db.testSessions.add(session)
-                    console.log("Test session saved:", session)
-                  }}
-                />
-              )}
-            </div>
-          )}
+            )}
 
           {/* Remove showDashboard and Dashboard references. Render FolderStudyMode if showStudyModeSelector and activeFolder and not activeNote. */}
           {showStudyModeSelector && activeFolder && !activeNote && (
@@ -1121,6 +1263,15 @@ export default function NoteApp() {
 
           {view === 'semantic-agents' && (
             <SemanticFolderAgents />
+          )}
+
+          {view === 'review' && activeNote && (
+            <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
+          )}
+
+          {/* Show ReviewPage when view is 'review' regardless of other state */}
+          {view === 'review' && !activeNote && (
+            <ReviewPage folderId={activeFolder || undefined} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
           )}
         </main>
       </div>

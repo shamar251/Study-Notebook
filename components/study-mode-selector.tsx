@@ -13,7 +13,7 @@ import type { Note } from "@/components/note-app"
 interface StudyModeSelectorProps {
   folderName: string
   folderDescription?: string
-  onSelectMode: (mode: "flashcards" | "quiz" | "test") => void
+  onSelectMode: (mode: "flashcards" | "quiz" | "test" | "review") => void
   onCreateNote: () => void
   folderNotes: Note[]
   onEditDescription?: (description: string) => void
@@ -149,6 +149,32 @@ export default function StudyModeSelector({
                 <CardFooter>
                   <Button className="w-full" onClick={() => onSelectMode("quiz")}>
                     Start Quiz <ArrowRight className="w-4 h-4 ml-2" />
+                  </Button>
+                </CardFooter>
+              </Card>
+
+              <Card className="hover:shadow-lg transition-shadow">
+                <CardHeader className="bg-purple-50 dark:bg-purple-900/20 rounded-t-lg">
+                  <CardTitle className="flex items-center gap-2">
+                    <BookOpen className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                    Spaced Repetition
+                  </CardTitle>
+                  <CardDescription>Review with spaced repetition algorithm</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <p className="text-gray-600 dark:text-gray-400">
+                    Use the FSRS algorithm to optimize your study schedule and improve long-term retention.
+                  </p>
+                  <div className="mt-4 bg-purple-50 dark:bg-purple-900/10 p-3 rounded-md">
+                    <div className="flex items-center gap-2 text-sm text-purple-700 dark:text-purple-300">
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Best for long-term retention and optimal study timing</span>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter>
+                  <Button className="w-full" onClick={() => onSelectMode("review")}>
+                    Start Review <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 </CardFooter>
               </Card>

@@ -17,6 +17,8 @@ export interface Note {
     quizAttempts: number;
     quizCorrect: number;
     flashcardReviews: number;
+    studyItems?: StudyItem[];
+    lastStudied?: number;
   };
 }
 
@@ -109,12 +111,33 @@ export interface QuizSession {
   }[];
 }
 
+export interface StudyItem {
+  id: string;
+  blockId: string;
+  noteId: string;
+  folderId: string;
+  type: "who" | "what" | "sequence";
+  nextReview?: number;
+  suspended: boolean;
+}
+
+export interface ReviewSession {
+  id: string;
+  studyItemId: string;
+  blockId: string;
+  noteId: string;
+  folderId: string;
+  startTime: number;
+}
+
 export class StudyNotebookDB extends Dexie {
   notes!: Table<Note>;
   folders!: Table<Folder>;
   operations!: Table<Operation>;
   testSessions!: Table<TestSession>;
   quizSessions!: Table<QuizSession>;
+  studyItems!: Table<StudyItem>;
+  reviewSessions!: Table<ReviewSession>;
 
   constructor() {
     super('StudyNotebookDB');
@@ -159,15 +182,9 @@ export class StudyNotebookDB extends Dexie {
       folders: 'id, name, parentId, description, createdAt, order, path, deletedAt',
       operations: '++id, type, timestamp, data',
       testSessions: 'id, noteId, folderId, startTime',
-      quizSessions: 'id, folderId, startTime'
-    });
-
-    this.version(8).stores({
-      notes: 'id, title, folderId, updatedAt, lastStudied, tags, order, deletedAt, favorite',
-      folders: 'id, name, parentId, description, createdAt, order, path, deletedAt, favorite',
-      operations: '++id, type, timestamp, data',
-      testSessions: 'id, noteId, folderId, startTime',
-      quizSessions: 'id, folderId, startTime'
+      quizSessions: 'id, folderId, startTime',
+      studyItems: 'id, blockId, noteId, folderId, type, nextReview, suspended',
+      reviewSessions: 'id, studyItemId, blockId, noteId, folderId, startTime'
     });
   }
 
@@ -203,24 +220,72 @@ export class StudyNotebookDB extends Dexie {
     await this.operations.delete(lastOperation.id!);
     return true;
   }
+
+  /**
+   * Create missing tables if they don't exist
+   */
+  async ensureTablesExist(): Promise<void> {
+    try {
+      console.log('Checking if studyItems table exists...');
+
+      // Check if studyItems table exists by trying to access it
+      try {
+        // Try to get the count to see if table exists
+        await (this as any).studyItems?.count();
+        console.log('studyItems table exists');
+      } catch (error) {
+        console.log('studyItems table does not exist, creating it...');
+        // Force table creation by reopening database
+        await this.close();
+        await this.open();
+        console.log('Database reopened, studyItems table should now exist');
+      }
+
+      // Check if reviewSessions table exists
+      try {
+        await (this as any).reviewSessions?.count();
+        console.log('reviewSessions table exists');
+      } catch (error) {
+        console.log('reviewSessions table does not exist, creating it...');
+        // Force table creation by reopening database
+        await this.close();
+        await this.open();
+        console.log('Database reopened, reviewSessions table should now exist');
+      }
+    } catch (error) {
+      console.error('Error ensuring tables exist:', error);
+    }
+  }
 }
 
 export const db = new StudyNotebookDB();
 
 // Initialize database with root folder if empty
 export async function initializeDatabase() {
-  const folderCount = await db.folders.count();
+  try {
+    console.log('Initializing database...');
 
-  if (folderCount === 0) {
-    const firstFolder: Folder = {
-      id: `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      name: "My Notes",
-      parentId: null,
-      createdAt: Date.now(),
-      order: 0,
-      path: []
-    };
-    await db.folders.add(firstFolder);
+    const folderCount = await db.folders.count();
+    console.log('Current folder count:', folderCount);
+
+    if (folderCount === 0) {
+      console.log('Creating root folder...');
+      const firstFolder: Folder = {
+        id: `folder-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: "My Notes",
+        parentId: null,
+        createdAt: Date.now(),
+        order: 0,
+        path: []
+      };
+      await db.folders.add(firstFolder);
+      console.log('Root folder created successfully');
+    }
+
+    console.log('Database initialization completed successfully');
+  } catch (error) {
+    console.error('Error initializing database:', error);
+    throw error;
   }
 }
 

@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Check, X, ArrowLeft, CheckCircle, RotateCcw } from "lucide-react"
+import { Check, X, ArrowLeft, CheckCircle, RotateCcw, HelpCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { Input } from "@/components/ui/input"
 import type { Note } from "@/components/note-app"
 import 'katex/dist/katex.min.css'
 import { InlineMath } from 'react-katex'
@@ -17,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { db } from "@/lib/db"
 import { BlockConnectionManager } from "@/lib/block-connections"
 import { generateQuizQuestions } from '@/lib/question-generator'
+import { SpacedRepetitionService } from '@/lib/spaced-repetition'
 
 interface QuizViewProps {
   note?: Note
@@ -115,6 +117,20 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
   const [userSequenceOrder, setUserSequenceOrder] = useState<string[]>([]); // stores user's submitted order
   const [showUserSequence, setShowUserSequence] = useState(false); // toggles between correct/user sequence
   const [quizStartTime, setQuizStartTime] = useState(Date.now())
+  const [hybridJudgingEnabled, setHybridJudgingEnabled] = useState<boolean>(false)
+  const [hybridLow, setHybridLow] = useState<number>(0.65)
+  const [hybridHigh, setHybridHigh] = useState<number>(0.9)
+  const [llmModel, setLlmModel] = useState<string>('')
+  const [llmTemperature, setLlmTemperature] = useState<number>(0.8)
+  const [llmTopP, setLlmTopP] = useState<number>(0.9)
+  const [userTextAnswer, setUserTextAnswer] = useState<string>("")
+  const [openEndedDecision, setOpenEndedDecision] = useState<'correct' | 'partial' | 'incorrect' | null>(null)
+  const [partialCreditWeight, setPartialCreditWeight] = useState<number>(0.5)
+  const [isJudging, setIsJudging] = useState<boolean>(false)
+  const [isHintLoading, setIsHintLoading] = useState<boolean>(false)
+  const [hintText, setHintText] = useState<string>("")
+  const [perQuestionLLM, setPerQuestionLLM] = useState<Record<string, boolean>>({})
+  const [quizLLMChance, setQuizLLMChance] = useState<number>(0.5)
 
   useEffect(() => {
     // Only initialize quiz if we should
@@ -135,6 +151,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
       setCurrentIndex(0)
       setSelectedAnswer(null)
       setIsAnswered(false)
+      setOpenEndedDecision(null)
       setScore(0)
       setQuizCompleted(false)
       setProgress(0)
@@ -151,6 +168,46 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     setProgress(0)
     setShouldInitialize(false)
   }, [note, notes, shouldInitialize])
+
+  // Load settings from localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const hj = window.localStorage.getItem('quizHybridJudging');
+      const low = window.localStorage.getItem('quizHybridLow');
+      const high = window.localStorage.getItem('quizHybridHigh');
+      const model = window.localStorage.getItem('llmModel');
+      const temp = window.localStorage.getItem('llmTemperature');
+      const topP = window.localStorage.getItem('llmTopP');
+      const partialW = window.localStorage.getItem('quizPartialWeight');
+      const llmChance = window.localStorage.getItem('quizLLMChance');
+      if (hj != null) setHybridJudgingEnabled(hj === 'true');
+      if (low != null) setHybridLow(Number(low));
+      if (high != null) setHybridHigh(Number(high));
+      if (model) setLlmModel(model);
+      if (temp) setLlmTemperature(Number(temp));
+      if (topP) setLlmTopP(Number(topP));
+      if (partialW) {
+        const w = Number(partialW);
+        if (!Number.isNaN(w) && w >= 0 && w <= 1) setPartialCreditWeight(w);
+      }
+      if (llmChance != null) {
+        const c = Number(llmChance);
+        if (!Number.isNaN(c) && c >= 0 && c <= 1) setQuizLLMChance(c);
+      }
+    } catch { }
+  }, [])
+
+  // Recompute per-question LLM flags whenever questions or difficulty/settings change
+  useEffect(() => {
+    if (!questions || questions.length === 0) return;
+    const mapping: Record<string, boolean> = {};
+    questions.forEach((q: any) => {
+      const isSeq = 'type' in q && q.type === 'sequence';
+      mapping[q.id] = hybridJudgingEnabled && !isSeq ? Math.random() < quizLLMChance : false;
+    });
+    setPerQuestionLLM(mapping);
+  }, [questions, hybridJudgingEnabled, quizLLMChance])
 
   useEffect(() => {
     // Update progress
@@ -192,13 +249,215 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     setSelectedAnswer(answer)
   }
 
-  const checkAnswer = () => {
-    if (!selectedAnswer) return;
-    setIsAnswered(true);
-    // Only check answer for multiple choice questions
+  const checkAnswer = async () => {
+    if (isAnswered || isJudging) return; // guard against double submit
     const q = questions[currentIndex];
-    if ('answer' in q && typeof q.answer === 'string' && selectedAnswer === q.answer) {
-      setScore(score + 1);
+    // Sequence handled elsewhere
+    if (!q || (('type' in q) && q.type === 'sequence')) return;
+
+    // For existing MCQ/TF flow
+    if (!hybridJudgingEnabled) {
+      if (!selectedAnswer) return;
+      setIsAnswered(true);
+      if ('answer' in q && typeof q.answer === 'string' && selectedAnswer === q.answer) {
+        setScore(score + 1);
+        // Create study item for correct answers
+        await createStudyItemFromQuestion(q);
+      }
+      return;
+    }
+
+    // Hybrid judging expects free-text user answer ONLY when this question is flagged for LLM; otherwise use selected option
+    const currentIsLLM = perQuestionLLM[(q as any).id] === true;
+    const userAnswer = hybridJudgingEnabled && currentIsLLM ? (userTextAnswer || '') : (selectedAnswer || '');
+    const correctAnswer = 'answer' in q ? (q as any).answer : '';
+    if (!correctAnswer) return;
+
+    // If user submits with empty text in LLM mode, treat as "I don't know" and reveal the answer immediately
+    if (hybridJudgingEnabled && currentIsLLM && (!userAnswer || userAnswer.trim() === '')) {
+      setIsAnswered(true);
+      setOpenEndedDecision('incorrect');
+      return;
+    }
+
+    setIsAnswered(true);
+    if (hybridJudgingEnabled && currentIsLLM) setIsJudging(true);
+
+    // Call IPC grading
+    // @ts-ignore
+    const isElectron = typeof window !== 'undefined' && window?.electronAPI?.gradeAnswer;
+    if (!isElectron || !(hybridJudgingEnabled && currentIsLLM)) {
+      // Fallback: exact match
+      if (userAnswer && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase()) {
+        setScore(s => s + 1);
+        // Create study item for correct answers
+        await createStudyItemFromQuestion(q);
+      }
+      return;
+    }
+    try {
+      // @ts-ignore
+      const modelToUse = (llmModel && llmModel.trim().length > 0)
+        ? llmModel
+        : (typeof window !== 'undefined' ? (window.localStorage.getItem('llmModel') || 'llama3:latest') : 'llama3:latest');
+      const res = await window.electronAPI.gradeAnswer({
+        userAnswer,
+        correctAnswer,
+        low: hybridLow,
+        high: hybridHigh,
+        model: modelToUse,
+        temperature: llmTemperature,
+        top_p: llmTopP,
+      });
+      // Mirror logs to terminal
+      try { /* @ts-ignore */ window.electronAPI?.log?.({ tag: 'QUIZ', res }); } catch { }
+      console.log('[QUIZ] grade response', res);
+      if (res?.success) {
+        if (res.decision === 'correct') {
+          setScore(s => s + 1);
+          setOpenEndedDecision('correct');
+          // Create study item for correct answers
+          await createStudyItemFromQuestion(q);
+        }
+        else if (res.decision === 'partial') {
+          setScore(s => s + partialCreditWeight);
+          setOpenEndedDecision('partial');
+          // Create study item for partial answers too
+          await createStudyItemFromQuestion(q);
+        }
+        else { setOpenEndedDecision('incorrect'); }
+        // In future: handle partial credit UI if needed
+      } else {
+        try { /* @ts-ignore */ window.electronAPI?.log?.({ tag: 'QUIZ', error: res?.error }); } catch { }
+        console.warn('[QUIZ] grade failed', res?.error);
+        // Fallback to exact match on error
+        if (userAnswer && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase()) {
+          setScore(s => s + 1); setOpenEndedDecision('correct');
+          // Create study item for correct answers
+          await createStudyItemFromQuestion(q);
+        } else {
+          setOpenEndedDecision('incorrect');
+        }
+      }
+    } catch (e) {
+      try { /* @ts-ignore */ window.electronAPI?.log?.({ tag: 'QUIZ', thrown: String(e) }); } catch { }
+      console.error('[QUIZ] grade threw', e);
+      if (userAnswer && userAnswer.trim().toLowerCase() === String(correctAnswer).trim().toLowerCase()) {
+        setScore(s => s + 1); setOpenEndedDecision('correct');
+        // Create study item for correct answers
+        await createStudyItemFromQuestion(q);
+      } else {
+        setOpenEndedDecision('incorrect');
+      }
+    } finally {
+      if (hybridJudgingEnabled) setIsJudging(false);
+    }
+  }
+
+  const createStudyItemFromQuestion = async (question: AnyQuizQuestion) => {
+    try {
+      // Get the note for this question
+      const currentNote = notes?.find(n => n.id === question.noteId) || note;
+      if (!currentNote) return;
+
+      // Find the corresponding block
+      let block;
+      if ('type' in question && question.type === 'sequence') {
+        // For sequence questions, find the first WHO block
+        block = currentNote.blocks.find((b: any) => b.type === 'who' && b.content === question.question);
+      } else {
+        // For other questions, find the block that matches the question
+        block = currentNote.blocks.find((b: any) =>
+          (b.type === 'who' && b.content === question.question) ||
+          (b.type === 'what' && b.content === question.answer)
+        );
+      }
+
+      if (block) {
+        // Check if study item already exists
+        const existingItems = await SpacedRepetitionService.getStudyItems(currentNote.id);
+        const exists = existingItems.some(item => item.blockId === block.id);
+
+        if (!exists) {
+          await SpacedRepetitionService.createStudyItemsFromBlocks([block], currentNote);
+        }
+      }
+    } catch (error) {
+      console.error('Error creating study item:', error);
+    }
+  }
+
+  const requestHint = async () => {
+    try {
+      const q: any = questions[currentIndex] as any;
+      if (!q) return;
+      setIsHintLoading(true);
+      setHintText("");
+      // @ts-ignore
+      const isElectron = typeof window !== 'undefined' && window?.electronAPI?.hint;
+      const modelToUse = (llmModel && llmModel.trim().length > 0)
+        ? llmModel
+        : (typeof window !== 'undefined' ? (window.localStorage.getItem('llmModel') || 'llama3:latest') : 'llama3:latest');
+      if (isElectron) {
+        // Prefer Electron IPC when available
+        // @ts-ignore
+        const res = await window.electronAPI.hint({
+          question: q.question || '',
+          options: q.options || [],
+          correctAnswer: q.answer || '',
+          model: modelToUse,
+          temperature: llmTemperature,
+          top_p: llmTopP,
+        });
+        if (res?.success) {
+          setHintText(res.hint || '');
+          return;
+        }
+      }
+      // Fallback: call Ollama HTTP API directly (useful in web or if preload not present)
+      const optsText = Array.isArray(q.options) && q.options.length > 0
+        ? `\nOptions: ${q.options.map((o: string, i: number) => `(${i + 1}) ${o}`).join(' ')}`
+        : '';
+      const noRevealLine = 'Do NOT reveal or state the exact answer. Never output the exact solution word or phrase.';
+      const correctGuard = q.answer ? `\nThe correct answer is known to you for evaluation but you must not reveal it: [REDACTED]. ${noRevealLine}` : `\n${noRevealLine}`;
+      const prompt = `You are a supportive tutor. Provide a single, concise hint (1-2 sentences) to help a student answer this quiz question without giving the answer away.${correctGuard}\nFocus on the key concept or a way to eliminate distractors.${optsText}\n\nQuestion: ${q.question || ''}\n\nHint:`;
+      const resp = await fetch('http://localhost:11434/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: modelToUse,
+          prompt,
+          options: { temperature: llmTemperature, top_p: llmTopP },
+        }),
+      });
+      const text = await resp.text();
+      let acc = '';
+      text.split('\n').forEach((line: string) => {
+        try { const obj = JSON.parse(line); if (obj.response) acc += obj.response; } catch { /* ignore */ }
+      });
+      function sanitize(raw: string, answer: string): string {
+        let out = (raw || '').replace(/```[\s\S]*?```/g, '').replace(/`([^`]+)`/g, '$1');
+        out = out.replace(/^(hint[:\-\s]*)/i, '').trim();
+        const parts = out.split(/(?<=[.!?])\s+/).slice(0, 2);
+        out = parts.join(' ').trim();
+        const ans = (answer || '').trim();
+        if (ans.length > 0) {
+          const escaped = ans.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+          const re = new RegExp(escaped, 'ig');
+          out = out.replace(re, '____');
+          if (/^(true|false)$/i.test(ans)) {
+            out = out.replace(/\btrue\b/ig, '____').replace(/\bfalse\b/ig, '____');
+          }
+        }
+        out = out.replace(/\b(the\s+answer\s+is|it\s+is)\b[^.?!]*/ig, '').trim();
+        return out.slice(0, 240);
+      }
+      const cleaned = sanitize(acc, q.answer || '');
+      setHintText(cleaned || '');
+    } catch (e) {
+      setHintText('Hint generation failed.');
+    } finally {
+      setIsHintLoading(false);
     }
   }
 
@@ -206,6 +465,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(currentIndex + 1)
       setSelectedAnswer(null)
+      setUserTextAnswer("")
       setIsAnswered(false)
     } else {
       setQuizCompleted(true)
@@ -365,7 +625,7 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
                 Question {currentIndex + 1} of {questions.length}
               </div>
               <div className="text-sm">
-                Score: {score} ({progress}% Complete)
+                Score: {Number.isInteger(score) ? score : score.toFixed(1)} ({progress}% Complete)
               </div>
             </div>
             <Progress value={progress} className="h-2 w-full mb-4" />
@@ -478,40 +738,97 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
                       />
                     </div>
                   )}
-                  <RadioGroup value={selectedAnswer || ""} onValueChange={handleAnswerSelect} className="space-y-3">
-                    {questions[currentIndex].options.map((option, index) => (
-                      <div
-                        key={index}
-                        className={`flex items-center space-x-2 rounded-lg border p-3 ${isAnswered
-                          ? option === (questions[currentIndex] as MultipleChoiceQuizQuestion).answer
-                            ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                            : option === selectedAnswer
-                              ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                              : ""
-                          : ""
-                          }`}
-                      >
-                        <RadioGroupItem value={option} id={`option-${index}`} disabled={isAnswered} />
-                        <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer">
-                          {option.startsWith('data:image') ? (
-                            <img
-                              src={option}
-                              alt="Option"
-                              className="max-h-16 rounded-md"
-                            />
-                          ) : (
-                            renderMathOrText({ option, math: 'math' in questions[currentIndex] ? questions[currentIndex].math : false })
-                          )}
-                        </Label>
-                        {isAnswered && option === (questions[currentIndex] as MultipleChoiceQuizQuestion).answer && (
-                          <Check className="w-5 h-5 text-green-500" />
-                        )}
-                        {isAnswered && option === selectedAnswer && option !== (questions[currentIndex] as MultipleChoiceQuizQuestion).answer && (
-                          <X className="w-5 h-5 text-red-500" />
+                  {hybridJudgingEnabled && perQuestionLLM[(questions[currentIndex] as any).id] ? (
+                    <div className="space-y-3">
+                      <label className="text-sm text-muted-foreground">Type your answer</label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={userTextAnswer}
+                          onChange={(e) => setUserTextAnswer(e.target.value)}
+                          placeholder="Your answer"
+                          disabled={isAnswered}
+                        />
+                        {!isAnswered && (
+                          <button
+                            onClick={requestHint}
+                            disabled={isHintLoading}
+                            className={`inline-flex items-center justify-center h-10 w-10 rounded-md border bg-background hover:bg-accent text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed ${isHintLoading ? 'opacity-60' : ''}`}
+                            title="Hint"
+                            aria-label="Hint"
+                            type="button"
+                          >
+                            {isHintLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <HelpCircle className="w-5 h-5" />}
+                          </button>
                         )}
                       </div>
-                    ))}
-                  </RadioGroup>
+                      {hintText && !isAnswered && (
+                        <div className="text-sm text-muted-foreground bg-accent/30 rounded-md p-2">{hintText}</div>
+                      )}
+                      {!isAnswered && (
+                        <div className="flex justify-center">
+                          <Button onClick={checkAnswer} disabled={isJudging}>
+                            Submit Answer
+                          </Button>
+                        </div>
+                      )}
+                      {isAnswered && (
+                        <div className="text-sm mt-1">
+                          {openEndedDecision === 'correct' && (
+                            <div className="space-y-1">
+                              <div className="text-green-600 font-semibold">Correct! You nailed it.</div>
+                              <div className="text-muted-foreground">Correct answer: {('answer' in questions[currentIndex]) ? (questions[currentIndex] as any).answer : ''}</div>
+                            </div>
+                          )}
+                          {openEndedDecision === 'partial' && (
+                            <div className="space-y-1">
+                              <div className="text-amber-600 font-semibold">Almost right — partial credit.</div>
+                              <div className="text-muted-foreground">Correct answer: {('answer' in questions[currentIndex]) ? (questions[currentIndex] as any).answer : ''}</div>
+                            </div>
+                          )}
+                          {openEndedDecision === 'incorrect' && (
+                            <div className="text-red-600 font-semibold">
+                              Not quite. Correct answer: {('answer' in questions[currentIndex]) ? (questions[currentIndex] as any).answer : ''}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <RadioGroup value={selectedAnswer || ""} onValueChange={handleAnswerSelect} className="space-y-3">
+                      {questions[currentIndex].options.map((option, index) => (
+                        <div
+                          key={index}
+                          className={`flex items-center space-x-2 rounded-lg border p-3 ${isAnswered
+                            ? option === (questions[currentIndex] as MultipleChoiceQuizQuestion).answer
+                              ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                              : option === selectedAnswer
+                                ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                                : ""
+                            : ""
+                            }`}
+                        >
+                          <RadioGroupItem value={option} id={`option-${index}`} disabled={isAnswered} />
+                          <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer">
+                            {option.startsWith('data:image') ? (
+                              <img
+                                src={option}
+                                alt="Option"
+                                className="max-h-16 rounded-md"
+                              />
+                            ) : (
+                              renderMathOrText({ option, math: 'math' in questions[currentIndex] ? questions[currentIndex].math : false })
+                            )}
+                          </Label>
+                          {isAnswered && option === (questions[currentIndex] as MultipleChoiceQuizQuestion).answer && (
+                            <Check className="w-5 h-5 text-green-500" />
+                          )}
+                          {isAnswered && option === selectedAnswer && option !== (questions[currentIndex] as MultipleChoiceQuizQuestion).answer && (
+                            <X className="w-5 h-5 text-red-500" />
+                          )}
+                        </div>
+                      ))}
+                    </RadioGroup>
+                  )}
                   {'answerImage' in questions[currentIndex] && isAnswered && questions[currentIndex].answerImage && (
                     <div className="mt-4 flex justify-center">
                       <img
@@ -525,18 +842,18 @@ export default function QuizView({ note, notes, folderName, onComplete }: QuizVi
               )
             )}
 
-            {/* Conditionally render the bottom navigation button only for non-sequence questions */}
+            {/* Bottom navigation: only show for non-sequence questions and only after answered in hybrid mode */}
             {!(('type' in questions[currentIndex]) && questions[currentIndex].type === "sequence") && (
               <div className="flex justify-center gap-4">
-                {!isAnswered ? (
+                {((!hybridJudgingEnabled || !perQuestionLLM[(questions[currentIndex] as any).id]) && !isAnswered) ? (
                   <Button onClick={checkAnswer} disabled={!selectedAnswer}>
                     Check Answer
                   </Button>
-                ) : (
-                  <Button onClick={goToNextQuestion}>
+                ) : isAnswered ? (
+                  <Button onClick={goToNextQuestion} disabled={(hybridJudgingEnabled && perQuestionLLM[(questions[currentIndex] as any).id] && isJudging)}>
                     {currentIndex < questions.length - 1 ? "Next Question" : "See Results"}
                   </Button>
-                )}
+                ) : null}
               </div>
             )}
           </div>
