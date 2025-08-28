@@ -119,6 +119,12 @@ export interface StudyItem {
   type: "who" | "what" | "sequence";
   nextReview?: number;
   suspended: boolean;
+  // SRS tracking data
+  interval?: number; // Current interval in days
+  repetitions?: number; // Number of successful reviews
+  easeFactor?: number; // SM-2 ease factor (default 2.5)
+  isLearning?: boolean; // Whether in learning phase (first few reviews)
+  learningStep?: number; // Current step in learning phase (0, 1, 2...)
 }
 
 export interface ReviewSession {

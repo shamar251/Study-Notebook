@@ -296,7 +296,40 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
     setCardRatings(prev => new Map(prev).set(currentIndex, rating))
 
     // Create or update study item immediately with the rating
-    await createStudyItemFromCurrentCard()
+    const currentCard = flashcards[currentIndex];
+    const notesToProcess = notes || (note ? [note] : []);
+    const currentNote = notesToProcess.find(n => n.id === currentCard?.noteId);
+
+    if (currentCard && currentNote) {
+      try {
+        // First create the study item
+        await createStudyItemFromCurrentCard()
+
+        // Reload the note to get the updated study items
+        const updatedNote = await db.notes.get(currentNote.id);
+
+        if (updatedNote) {
+          // Find the study item and rate it to set the review date
+          const block = updatedNote.blocks.find(b =>
+            b.type === 'who' && b.content === currentCard.front
+          );
+
+          if (block && updatedNote.studyStats?.studyItems) {
+            const studyItem = updatedNote.studyStats.studyItems.find(item => item.blockId === block.id);
+
+            if (studyItem) {
+              console.log(`🎯 Rating study item ${studyItem.id} with rating ${rating}`);
+              await SpacedRepetitionService.reviewStudyItem(studyItem.id, rating);
+              console.log(`✅ Study item rated and review date set`);
+            } else {
+              console.warn('Study item not found for rating');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error rating flashcard:', error);
+      }
+    }
 
     // Move to next card or complete
     if (currentIndex < flashcards.length - 1) {
@@ -347,10 +380,11 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
         return;
       }
 
-      // Create study items from the block
+      // Create study items from the block (force create for flashcard rating)
       const studyItems = await SpacedRepetitionService.createStudyItemsFromBlocks(
         [block],
-        currentNote
+        currentNote,
+        true // forceCreate = true for flashcard ratings
       );
 
       if (studyItems.length > 0) {

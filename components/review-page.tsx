@@ -65,6 +65,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
   const [isFiltering, setIsFiltering] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false)
+  const [simulationResults, setSimulationResults] = useState<any>(null)
 
   const { toast } = useToast()
 
@@ -77,11 +78,72 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
   // Helper functions for review history
   const getUpcomingReviewsCount = (): number => {
-    if (!studyItems.length) return 0;
+    console.log('🚨 NEW getUpcomingReviewsCount function is running! (Version 2)');
+    if (!studyItems.length) {
+      console.log('🔍 getUpcomingReviewsCount: No study items');
+      return 0;
+    }
+
     const now = Date.now();
-    return studyItems.filter(item =>
-      !item.suspended && (item.nextReview || 0) > now
-    ).length;
+    console.log(`🔍 getUpcomingReviewsCount: Checking ${studyItems.length} study items against current time ${new Date(now).toISOString()}`);
+
+    let validItems = 0;
+    let invalidItems = 0;
+    let nullItems = 0;
+    let undefinedItems = 0;
+    let zeroItems = 0;
+    let suspendedItems = 0;
+
+    const upcomingItems = studyItems.filter(item => {
+      // Check suspension first
+      if (item.suspended) {
+        suspendedItems++;
+        return false;
+      }
+
+      // Check for null
+      if (item.nextReview === null) {
+        nullItems++;
+        invalidItems++;
+        return false;
+      }
+
+      // Check for undefined
+      if (item.nextReview === undefined) {
+        undefinedItems++;
+        invalidItems++;
+        return false;
+      }
+
+      // Check for zero
+      if (item.nextReview === 0) {
+        zeroItems++;
+        invalidItems++;
+        return false;
+      }
+
+      // Check if it's a valid future date
+      if (item.nextReview > now) {
+        validItems++;
+        return true;
+      }
+
+      // Past or present date
+      invalidItems++;
+      return false;
+    });
+
+    console.log(`🔍 getUpcomingReviewsCount BREAKDOWN:`);
+    console.log(`  Total items: ${studyItems.length}`);
+    console.log(`  Valid upcoming: ${validItems}`);
+    console.log(`  Invalid/past: ${invalidItems}`);
+    console.log(`  NULL dates: ${nullItems}`);
+    console.log(`  UNDEFINED dates: ${undefinedItems}`);
+    console.log(`  ZERO dates: ${zeroItems}`);
+    console.log(`  Suspended: ${suspendedItems}`);
+    console.log(`  RESULT: ${upcomingItems.length} upcoming items`);
+
+    return upcomingItems.length;
   };
 
   const getCompletedReviewsCount = (): number => {
@@ -108,7 +170,14 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
     const now = Date.now();
     const upcomingItems = studyItems
-      .filter(item => !item.suspended && (item.nextReview || 0) > now)
+      .filter(item => {
+        // Only show items that have valid future review dates
+        const hasValidDate = item.nextReview && item.nextReview > 0;
+        const isFuture = hasValidDate && item.nextReview! > now;
+        const isNotSuspended = !item.suspended;
+
+        return isNotSuspended && hasValidDate && isFuture;
+      })
       .sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0))
       .slice(0, 10); // Show next 10 items
 
@@ -294,16 +363,19 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
   const loadStudyItems = async () => {
     try {
-      console.log('Loading study items...');
+      console.log('🔄 Loading study items...');
+
+      // Ensure all notes have study items created
+      await SpacedRepetitionService.ensureStudyItemsExist();
 
       // Always load all study items and due items
       const items = await SpacedRepetitionService.getStudyItems()
-      console.log('Loaded study items:', items);
+      console.log('🔄 Loaded study items:', items.length);
       setStudyItems(items)
 
       const due = await SpacedRepetitionService.getDueStudyItems()
-      console.log('Loaded due items:', due);
-      console.log('Due items details:', due.map(item => ({
+      console.log('🔄 Loaded due items:', due.length);
+      console.log('🔄 Due items details:', due.map(item => ({
         id: item.id,
         type: item.type,
         nextReview: item.nextReview,
@@ -314,7 +386,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
       setDueItems(due)
 
     } catch (error) {
-      console.error('Error loading study items:', error)
+      console.error('❌ Error loading study items:', error)
       toast({
         title: "Error",
         description: "Failed to load study items",
@@ -324,17 +396,60 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
   }
 
   const refreshData = async () => {
+    console.log('🔄 Manual refresh triggered');
     await loadStudyItems()
+  }
+
+  const forceRefresh = () => {
+    console.log('🔄 Force refresh triggered - reloading page');
+    window.location.reload();
   }
 
 
 
-  const startReview = (folderId?: string) => {
-    // For folder-specific reviews, only show due items
-    // For global review, show all due items
-    const itemsToReview = folderId ? dueItems.filter(item => item.folderId === folderId) : dueItems;
+  const startReview = async (folderId?: string) => {
+    console.log('🔄 startReview called with:', { folderId, globalDueItemsCount: dueItems.length });
+
+    let itemsToReview: StudyItemWithBlock[] = [];
+
+    if (folderId) {
+      // For folder-specific reviews, get due items for that specific folder
+      try {
+        console.log(`🔄 Getting due items for folder: ${folderId}`);
+        const folderDueItems = await SpacedRepetitionService.getDueStudyItems(folderId);
+        itemsToReview = folderDueItems;
+        console.log(`🔄 Folder-specific review: Found ${folderDueItems.length} due items for folder ${folderId}`);
+
+        if (folderDueItems.length === 0) {
+          console.log('🔄 No folder-specific due items found, checking global dueItems as fallback');
+          const fallbackItems = dueItems.filter(item => item.folderId === folderId);
+          console.log(`🔄 Fallback found ${fallbackItems.length} items in global dueItems for this folder`);
+          itemsToReview = fallbackItems;
+        }
+      } catch (error) {
+        console.error('❌ Error getting folder due items:', error);
+        // Fallback to filtering global dueItems
+        itemsToReview = dueItems.filter(item => item.folderId === folderId);
+        console.log(`🔄 Fallback: Using ${itemsToReview.length} items from global dueItems`);
+      }
+    } else {
+      // For global review, use all due items
+      itemsToReview = dueItems;
+      console.log(`🔄 Global review: Using ${itemsToReview.length} global due items`);
+    }
+
+    console.log('🔄 Final itemsToReview:', {
+      count: itemsToReview.length,
+      items: itemsToReview.map(item => ({
+        id: item.id,
+        type: item.type,
+        noteTitle: item.note?.title,
+        blockContent: item.block?.content?.substring(0, 50)
+      }))
+    });
 
     if (itemsToReview.length === 0) {
+      console.log('🔄 No items to review - showing toast');
       toast({
         title: "No items to review",
         description: folderId ? "This folder has no items due for review" : "No items are due for review",
@@ -344,11 +459,14 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
     // Start the review using the existing flashcard system
     const folderName = folderId ? folders.find(f => f.id === folderId)?.name || "Unknown Folder" : "All Folders";
+    console.log('🔄 Starting review session:', { folderName, itemCount: itemsToReview.length });
 
     if (onStartReview) {
+      console.log('🔄 Calling onStartReview callback');
       onStartReview(itemsToReview, folderName);
     } else {
       // Fallback: show toast if no callback provided
+      console.log('🔄 No onStartReview callback - showing fallback toast');
       toast({
         title: "Review session",
         description: `Starting review of ${itemsToReview.length} items from ${folderName}`,
@@ -453,13 +571,20 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
     }
 
     // Start the study session using the existing flashcard system
-    const folderName = "All Folders";
+    const folderName = "Random Notes";
 
     if (onStartReview) {
       // Create study items from WHO/WHAT pairs (same logic as getFolderStudyItems)
       const studyItems: StudyItemWithBlock[] = [];
 
-      notes.forEach(note => {
+      // Shuffle notes to get random selection
+      const shuffledNotes = [...notes].sort(() => Math.random() - 0.5);
+
+      // Limit to a reasonable number of notes for study (e.g., max 10 notes)
+      const maxNotesToStudy = Math.min(10, shuffledNotes.length);
+      const selectedNotes = shuffledNotes.slice(0, maxNotesToStudy);
+
+      selectedNotes.forEach(note => {
         note.blocks.forEach((block, idx) => {
           if (block.type === "who") {
             if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
@@ -485,7 +610,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                     id: `study-${note.id}-${block.id}`,
                     blockId: block.id,
                     noteId: note.id,
-                    folderId: note.folderId,
+                    folderId: note.id,
                     type: block.type,
                     nextReview: Date.now(),
                     suspended: false,
@@ -507,13 +632,13 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
         return
       }
 
-      console.log('🔄 startStudyAll: Calling onStartReview with:', { studyItems, folderName, studyItemsCount: studyItems.length });
+      console.log('🔄 startStudyAll: Calling onStartReview with:', { studyItems, folderName, studyItemsCount: studyItems.length, notesStudied: maxNotesToStudy });
       onStartReview(studyItems, folderName);
     } else {
       // Fallback: show toast if no callback provided
       toast({
         title: "Study session",
-        description: `Starting study of ${studyItems.length} study items from all folders`,
+        description: `Starting study of ${studyItems.length} study items from random notes`,
       })
     }
   }
@@ -614,55 +739,36 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
     }
 
     return foldersToRender.map(folder => {
-      // Count study items and due items in this folder and all its subfolders
-      const getFolderStudyItems = (folderId: string): number => {
-        // Count WHO/WHAT pairs (study items) like folder-study-mode.tsx does
-        const getFolderNotes = (folderId: string): Note[] => {
-          const directNotes = notes.filter(note => note.folderId === folderId);
-          const childFolders = folders.filter(f => f.parentId === folderId);
-          const childNotes = childFolders.reduce((acc, folder) => {
-            return [...acc, ...getFolderNotes(folder.id)];
-          }, [] as Note[]);
-          return [...directNotes, ...childNotes];
-        };
-
-        const folderNotes = getFolderNotes(folderId);
-
-        // Count WHO/WHAT pairs using the same logic as folder-study-mode.tsx
-        let count = 0;
-        folderNotes.forEach(note => {
-          note.blocks.forEach((block, idx) => {
-            if (block.type === "who") {
-              if (Array.isArray(block.linkedBlockIds) && block.linkedBlockIds.length === 1) {
-                const whatBlock = note.blocks.find(b => b.id === block.linkedBlockIds![0] && b.type === "what");
-                if (whatBlock && whatBlock.content && whatBlock.content.trim() !== "") {
-                  count++;
-                }
-              } else {
-                if (idx < note.blocks.length - 1) {
-                  const nextBlock = note.blocks[idx + 1];
-                  if (nextBlock.type === "what" && nextBlock.content && nextBlock.content.trim() !== "") {
-                    count++;
-                  }
-                }
-              }
-            }
-          });
-        });
-        return count;
+      const countFolderNotes = (folderId: string): number => {
+        const directNotes = notes.filter(note => note.folderId === folderId).length;
+        const childFolders = folders.filter(f => f.parentId === folderId);
+        const childNotes = childFolders.reduce((count, childFolder) => {
+          return count + countFolderNotes(childFolder.id);
+        }, 0);
+        return directNotes + childNotes;
       };
 
-      const getFolderDueItems = (folderId: string): number => {
+      const getFolderStudyItems = (folderId: string): number => {
+        const directItems = studyItems.filter(item => item.folderId === folderId).length;
+        const childFolders = folders.filter(f => f.parentId === folderId);
+        const childItems = childFolders.reduce((count, childFolder) => {
+          return count + getFolderStudyItems(childFolder.id);
+        }, 0);
+        return directItems + childItems;
+      };
+
+      // Use the global dueItems for display purposes to avoid async complexity
+      const getFolderDueItemsDisplay = (folderId: string): number => {
         const directItems = dueItems.filter(item => item.folderId === folderId).length;
         const childFolders = folders.filter(f => f.parentId === folderId);
-        const childItems = childFolders.reduce((count, folder) => {
-          return count + getFolderDueItems(folder.id);
+        const childItems = childFolders.reduce((count, childFolder) => {
+          return count + getFolderDueItemsDisplay(childFolder.id);
         }, 0);
         return directItems + childItems;
       };
 
       const folderStudyItems = getFolderStudyItems(folder.id);
-      const folderDueItems = getFolderDueItems(folder.id);
+      const folderDueItems = getFolderDueItemsDisplay(folder.id);
       const folderNotes = countFolderNotes(folder.id);
 
       console.log(`📁 Folder: ${folder.name}, totalNotes: ${folderNotes}, studyItems: ${folderStudyItems}, dueItems: ${folderDueItems}`);
@@ -720,11 +826,11 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
                 <div className="flex flex-col gap-2.5 ml-6">
                   <Button
-                    onClick={() => startReview(folder.id)}
-                    disabled={folderDueItems === 0}
+                    onClick={async () => await startReview(folder.id)}
+                    disabled={folderStudyItems === 0}
                     className="flex items-center gap-2 h-9 px-3 text-sm font-medium shadow-sm hover:shadow-md transition-all duration-200"
                   >
-                    <BookOpen className="w-3.5 h-3.5" />
+                    <Clock className="w-3.5 h-3.5" />
                     Review ({folderDueItems})
                   </Button>
                   <Button
@@ -748,7 +854,6 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
               </div>
             </CardContent>
           </Card>
-
         </div>
       );
     });
@@ -817,17 +922,17 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
         <div className="pl-8 pr-8 max-w-7xl pb-8">
           <div className="flex gap-4">
             <Button
-              onClick={() => startReview()}
+              onClick={async () => await startReview()}
               disabled={dueItems.length === 0}
               className="flex items-center gap-2"
             >
-              <BookOpen className="w-4 h-4" />
+              <Clock className="w-4 h-4" />
               Review All Due Items ({dueItems.length})
             </Button>
 
             <Button
               variant="outline"
-              onClick={() => startReview()}
+              onClick={async () => await startReview()}
               disabled={dueItems.length === 0}
               className="flex items-center gap-2"
             >
@@ -835,19 +940,43 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
               Review All Items Due Today ({dueItems.length})
             </Button>
 
-            <Button
+            {/* <Button
+              variant="outline"
+              onClick={forceRefresh}
+              className="flex items-center gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Force Refresh
+            </Button> */}
+
+            {/* <Button
+              variant="destructive"
+              onClick={async () => {
+                if (window.confirm('This will clear all review dates from unstudied items. Continue?')) {
+                  // @ts-ignore - clearAllReviewDates is added dynamically
+                  await window.clearAllReviewDates();
+                  forceRefresh();
+                }
+              }}
+              className="flex items-center gap-2"
+            >
+              <XCircle className="w-4 h-4" />
+              Clear All Review Dates
+            </Button> */}
+
+            {/* <Button
               variant="outline"
               onClick={refreshData}
               className="flex items-center gap-2"
             >
               <RefreshCw className="w-4 h-4" />
               Refresh
-            </Button>
+            </Button> */}
 
-            <Button
+            {/* <Button
               variant="outline"
               onClick={() => {
-                console.log('🔄 Study All button clicked');
+                console.log('🔄 Study button clicked');
                 if (onSelectMode) {
                   onSelectMode("flashcards");
                 } else {
@@ -858,27 +987,107 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
               className="flex items-center gap-2"
             >
               <Lightbulb className="w-4 h-4" />
-              Study All Notes ({notes.length})
-            </Button>
+              Study Random ({notes.length})
+            </Button> */}
           </div>
         </div>
       )}
 
       <div className="pl-8 pr-8 max-w-7xl pb-8">
+        {/* DEBUG INFO - Remove after fixing */}
+        {/* <div className="mb-4 p-4 bg-yellow-100 dark:bg-yellow-900 border rounded">
+          <h3 className="font-bold text-sm mb-2">🔍 DEBUG INFO:</h3>
+          <div className="text-xs space-y-2">
+            <div>
+              <p>Total studyItems: {studyItems.length}</p>
+              <p>Sample item nextReview values:</p>
+              <ul className="ml-4">
+                {studyItems.slice(0, 5).map((item, i) => (
+                  <li key={i}>Item {i + 1}: nextReview = {String(item.nextReview)} ({typeof item.nextReview})</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p>getUpcomingReviewsCount() result: {getUpcomingReviewsCount()}</p>
+              <p>dueItems.length: {dueItems.length}</p>
+              <p>Sample dueItems nextReview values:</p>
+              <ul className="ml-4">
+                {dueItems.slice(0, 3).map((item, i) => (
+                  <li key={i}>Due Item {i + 1}: nextReview = {String(item.nextReview)} ({typeof item.nextReview})</li>
+                ))}
+              </ul>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={async () => {
+                  const simulation = (window as any).simulateIntervals();
+                  setSimulationResults(simulation);
+                }}
+                className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                🧮 Simulate Intervals
+              </button>
+              {simulationResults && (
+                <button
+                  onClick={() => setSimulationResults(null)}
+                  className="px-2 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600"
+                >
+                  Clear Results
+                </button>
+              )}
+            </div>
+
+            {simulationResults && (
+              <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-950 border rounded">
+                <h4 className="font-bold text-sm mb-2">📈 Spaced Repetition Simulation Results</h4>
+                <p className="text-xs mb-2">Start Date: {simulationResults.startDate}</p>
+                <div className="space-y-3">
+                  {Object.entries(simulationResults.scenarios).map(([scenarioName, scenario]: [string, any]) => (
+                    <div key={scenarioName} className="border-l-2 border-blue-300 pl-2">
+                      <h5 className="font-semibold text-xs text-blue-800 dark:text-blue-200">{scenarioName}</h5>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        Ratings: {scenario.ratings.join(' → ')} | Total span: {scenario.totalDaysSpanned} days
+                      </p>
+                      <div className="text-xs space-y-1">
+                        {scenario.reviews.map((review: any, idx: number) => (
+                          <div key={idx} className="flex justify-between items-center py-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Review {review.reviewNumber}: {review.rating}</span>
+                              <span className={`px-1 py-0.5 rounded text-xs ${review.phase === 'Learning' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'}`}>
+                                {review.phase}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono">{review.interval} → {review.nextReviewDate}</span>
+                              <span className="text-xs text-gray-500 dark:text-gray-400">
+                                EF: {review.easeFactor} | Rep: {review.repetitions}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div> */}
+
         {/* Overview Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-          <Card className="group transition-all duration-300 hover:shadow-xl border-0 shadow-sm hover:scale-[1.02] bg-gradient-to-br from-indigo-50 to-indigo-100/50 dark:from-indigo-950/30 dark:to-indigo-900/20">
+          <Card className="group transition-all duration-300 hover:shadow-xl border-0 shadow-sm hover:scale-[1.02] bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-950/30 dark:to-slate-900/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-              <CardTitle className="text-sm font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider">Items Due Today</CardTitle>
+              <CardTitle className="text-sm font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Due Today</CardTitle>
               <div className="flex items-center gap-3">
-                <span className="text-3xl font-bold text-indigo-900 dark:text-indigo-100">{filteredStats.dueItems}</span>
+                <span className="text-3xl font-bold text-slate-900 dark:text-slate-100">{filteredStats.dueItems}</span>
                 <div className="p-2 bg-white rounded-lg border border-border/30 shadow-sm group-hover:shadow-md transition-all">
-                  <Clock className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                  <Clock className="h-5 w-5 text-slate-600 dark:text-slate-400" />
                 </div>
               </div>
             </CardHeader>
             <CardContent className="pt-0">
-              <p className="text-sm text-indigo-600 dark:text-indigo-400">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 {filteredStats.dueItems === 0 ? 'All caught up!' : `${filteredStats.dueItems} items need your attention`}
               </p>
             </CardContent>
@@ -886,7 +1095,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
           <Card className="group transition-all duration-300 hover:shadow-xl border-0 shadow-sm hover:scale-[1.02] bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/30 dark:to-emerald-900/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
-              <CardTitle className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">Total Study Items</CardTitle>
+              <CardTitle className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">Study Items</CardTitle>
               <div className="flex items-center gap-3">
                 <span className="text-3xl font-bold text-emerald-900 dark:text-emerald-100">{filteredStats.studyItems}</span>
                 <div className="p-2 bg-white rounded-lg border border-border/30 shadow-sm group-hover:shadow-md transition-all">
@@ -901,18 +1110,18 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
             </CardContent>
           </Card>
 
-          <Card className="group transition-all duration-300 hover:shadow-xl border-0 shadow-sm hover:scale-[1.02] bg-gradient-to-br from-rose-50 to-rose-100/50 dark:from-rose-950/30 dark:to-rose-900/20">
+          <Card className="group transition-all duration-300 hover:shadow-xl border-0 shadow-sm hover:scale-[1.02] bg-gradient-to-br from-cyan-50 to-cyan-100/50 dark:from-cyan-950/30 dark:to-cyan-900/20">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <CardTitle className="text-sm font-semibold text-rose-700 dark:text-rose-300 uppercase tracking-wider">Study Decks</CardTitle>
+              <CardTitle className="text-sm font-semibold text-cyan-700 dark:text-cyan-300 uppercase tracking-wider">Study Decks</CardTitle>
               <div className="flex items-center gap-3">
-                <span className="text-3xl font-bold text-rose-900 dark:text-rose-100">{filteredStats.folders}</span>
+                <span className="text-3xl font-bold text-cyan-900 dark:text-cyan-100">{filteredStats.folders}</span>
                 <div className="p-2 bg-white rounded-lg border border-border/30 shadow-sm group-hover:shadow-md transition-all">
-                  <FolderIcon className="h-5 w-5 text-rose-600 dark:text-rose-400" />
+                  <FolderIcon className="h-5 w-5 text-cyan-600 dark:text-cyan-400" />
                 </div>
               </div>
             </CardHeader>
             <CardContent className="pt-0">
-              <p className="text-sm text-rose-600 dark:text-rose-400">
+              <p className="text-sm text-cyan-600 dark:text-cyan-400">
                 {filteredStats.folders === 1 ? '1 organized deck' : `${filteredStats.folders} organized decks`}
               </p>
             </CardContent>
@@ -927,7 +1136,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                 <div className="p-2 bg-white rounded-lg border border-border/30 shadow-sm group-hover:shadow-md transition-all">
                   <Calendar className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <CardTitle className="text-lg font-semibold text-gray-900 dark:text-gray-100">Review Schedule & History</CardTitle>
+                <CardTitle className="text-lg font-semibold text-gray-900 dark:text-gray-100">Review Schedule</CardTitle>
               </div>
               <div className="flex items-center gap-3">
                 <Badge variant="outline" className="text-xs font-medium px-3 py-1.5">
@@ -979,15 +1188,16 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
           </Card>
         </div>
 
-        {/* Folder Selection */}
-        <div className="mb-10">
-          <div className="bg-muted/30 rounded-xl p-6 border border-border/50">
-            <div className="flex items-center justify-between">
+        {/* Filter and Folder Selection */}
+        <div className="mb-4">
+          <div className="bg-muted/30 rounded-xl p-5 border border-border/50">
+            {/* Header Row */}
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white rounded-lg border border-border/30 shadow-sm">
-                  <FolderIcon className="w-5 h-5 text-primary" />
+                  <Filter className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter Study Decks</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter</h3>
               </div>
               {selectedFolderId !== "all" && (
                 <div className="flex items-center gap-3">
@@ -1029,33 +1239,30 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                     ))}
                   </SelectContent>
                 </Select>
-
               </div>
             </div>
-          </div>
 
-          {/* Breadcrumb for nested folders */}
-          {selectedFolderId !== "all" && (() => {
-            const getFolderPath = (folderId: string): Folder[] => {
-              const path: Folder[] = [];
-              let currentFolder = folders.find(f => f.id === folderId);
+            {/* Folder Path - Always visible when folder is selected */}
+            {selectedFolderId !== "all" && (() => {
+              const getFolderPath = (folderId: string): Folder[] => {
+                const path: Folder[] = [];
+                let currentFolder = folders.find(f => f.id === folderId);
 
-              while (currentFolder) {
-                path.unshift(currentFolder);
-                if (!currentFolder!.parentId) break;
-                const nextFolder = folders.find(f => f.id === currentFolder!.parentId);
-                if (!nextFolder) break;
-                currentFolder = nextFolder!;
-              }
+                while (currentFolder) {
+                  path.unshift(currentFolder);
+                  if (!currentFolder!.parentId) break;
+                  const nextFolder = folders.find(f => f.id === currentFolder!.parentId);
+                  if (!nextFolder) break;
+                  currentFolder = nextFolder!;
+                }
 
-              return path;
-            };
+                return path;
+              };
 
-            const folderPath = getFolderPath(selectedFolderId);
+              const folderPath = getFolderPath(selectedFolderId);
 
-            if (folderPath.length > 1) {
               return (
-                <div className="mt-4 p-3 bg-muted/20 rounded-lg border border-border/30">
+                <div className="pt-4 border-t border-border/30">
                   <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
                     <FolderIcon className="w-4 h-4" />
                     <span className="font-medium">Folder Path:</span>
@@ -1077,13 +1284,12 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                   </div>
                 </div>
               );
-            }
-            return null;
-          })()}
+            })()}
+          </div>
         </div>
 
         {/* Folders as Decks */}
-        <div className="space-y-6">
+        <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-white rounded-lg border border-border/30 shadow-sm">

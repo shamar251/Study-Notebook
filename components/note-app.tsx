@@ -873,6 +873,13 @@ export default function NoteApp() {
 
   const handleStartReview = async (studyItems: any[], folderName: string) => {
     console.log('🔄 handleStartReview called with:', { studyItems, folderName, studyItemsCount: studyItems.length });
+    console.log('🔄 handleStartReview study items details:', studyItems.map(item => ({
+      id: item.id,
+      type: item.type,
+      noteTitle: item.note?.title,
+      folderId: item.folderId,
+      blockContent: item.block?.content?.substring(0, 50)
+    })));
 
     // Store the study session data
     setCurrentStudySession({
@@ -909,6 +916,7 @@ export default function NoteApp() {
         });
         setFolderNotes(notesInFolder);
         console.log('🔄 handleStartReview: Updated folderNotes with', notesInFolder.length, 'notes');
+        console.log('🔄 handleStartReview: FolderNotes details:', notesInFolder.map(n => ({ id: n.id, title: n.title, blocksCount: n.blocks.length })));
       }
     } else if (folderName === "All Folders") {
       // For "All Folders", set folderNotes to all notes
@@ -916,11 +924,13 @@ export default function NoteApp() {
       console.log('🔄 handleStartReview: Set folderNotes to all notes:', notes.length);
     }
 
-    console.log('🔄 handleStartReview: State set to:', {
+    console.log('🔄 handleStartReview: Final state transition:', {
       view: 'flashcards',
       activeNote: null,
       showStudyModeSelector: false,
-      currentStudySession: { studyItems, folderName }
+      currentStudySession: { studyItemsCount: studyItems.length, folderName },
+      activeFolder: folderName !== "All Folders" && studyItems.length > 0 ? studyItems[0]?.folderId : null,
+      folderNotesCount: folderName === "All Folders" ? notes.length : (studyItems.length > 0 ? notes.filter(n => n.folderId === studyItems[0]?.folderId).length : 0)
     });
   };
 
@@ -1170,7 +1180,7 @@ export default function NoteApp() {
                     <FlashcardView
                       notes={folderNotes}
                       folderName={currentStudySession ? currentStudySession.folderName : (folders.find(f => f.id === activeFolder)?.name || "Study")}
-                      studyItems={undefined}
+                      studyItems={currentStudySession?.studyItems}
                       onComplete={() => {
                         // Handle completion for folder-level flashcards
                         console.log("Folder flashcards completed");

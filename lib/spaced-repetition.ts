@@ -77,28 +77,140 @@ export class SpacedRepetitionService {
   }
 
   /**
-   * Create study items from blocks in a note
+   * Create study items from blocks in a note based on WHO-HOW/WHO-WHAT relationships
    */
-  static async createStudyItemsFromBlocks(blocks: Block[], note: Note): Promise<StudyItem[]> {
+  static async createStudyItemsFromBlocks(blocks: Block[], note: Note, forceCreate: boolean = false): Promise<StudyItem[]> {
     try {
       console.log('🔄 createStudyItemsFromBlocks called - Version 7 compatible mode');
       await this.ensureDatabaseReady();
 
       const studyItems: StudyItem[] = [];
 
-      for (const block of blocks) {
-        if (block.type === 'who' || block.type === 'what') {
+      // If forceCreate is true (for flashcard ratings), create study items for any WHO block
+      if (forceCreate) {
+        console.log('🔄 Force creating study items for flashcard rating');
+        const whoBlocks = blocks.filter(b => b.type === 'who');
+
+        for (const whoBlock of whoBlocks) {
           const studyItem: StudyItem = {
             id: `study-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            blockId: block.id,
+            blockId: whoBlock.id,
             noteId: note.id,
             folderId: note.folderId,
-            type: block.type,
-            nextReview: Date.now() + (24 * 60 * 60 * 1000), // Review tomorrow (24 hours from now)
+            type: "who",
+            nextReview: undefined, // Will be set when rated
             suspended: false,
+            // Initialize SRS data
+            interval: 1,
+            repetitions: 0,
+            easeFactor: 2.5,
+            isLearning: true,
+            learningStep: 0,
           };
 
+          console.log(`🔧 Force created study item for WHO block:`, {
+            id: studyItem.id,
+            blockId: whoBlock.id,
+            blockContent: whoBlock.content?.substring(0, 50)
+          });
+
           studyItems.push(studyItem);
+        }
+
+        // Store the study items
+        if (studyItems.length > 0) {
+          const updatedNote = {
+            ...note,
+            studyStats: {
+              quizAttempts: note.studyStats?.quizAttempts || 0,
+              quizCorrect: note.studyStats?.quizCorrect || 0,
+              flashcardReviews: note.studyStats?.flashcardReviews || 0,
+              studyItems: [...(note.studyStats?.studyItems || []), ...studyItems],
+              lastStudied: Date.now()
+            }
+          };
+
+          await db.notes.put(updatedNote);
+          console.log(`Force added ${studyItems.length} study items to note: ${note.title}`);
+        }
+
+        return studyItems;
+      }
+
+      // Normal mode: Only create study items for WHO blocks that have valid relationships
+      const whoBlocks = blocks.filter(b => b.type === 'who');
+
+      for (const whoBlock of whoBlocks) {
+        let shouldCreateStudyItem = false;
+        let relatedBlock: Block | null = null;
+
+        // Check if WHO block has linked blocks
+        if (whoBlock.linkedBlockIds && whoBlock.linkedBlockIds.length > 0) {
+          // Case 1: WHO -> single HOW (acts as WHAT)
+          const linkedHowBlocks = whoBlock.linkedBlockIds
+            .map(id => blocks.find(b => b.id === id && b.type === 'how'))
+            .filter(Boolean) as Block[];
+
+          if (linkedHowBlocks.length === 1) {
+            const howBlock = linkedHowBlocks[0];
+            // Check if this HOW block is NOT linked to another HOW block (making it a terminal/WHAT-like block)
+            const howLinksToOtherHow = howBlock.linkedBlockIds?.some(id =>
+              blocks.find(b => b.id === id && b.type === 'how')
+            );
+
+            if (!howLinksToOtherHow) {
+              shouldCreateStudyItem = true;
+              relatedBlock = howBlock;
+              console.log(`🔧 Found WHO -> single terminal HOW relationship: WHO(${whoBlock.content?.substring(0, 30)}) -> HOW(${howBlock.content?.substring(0, 30)})`);
+            } else {
+              console.log(`🔧 Skipping WHO -> HOW chain (not terminal): WHO(${whoBlock.content?.substring(0, 30)}) -> HOW(${howBlock.content?.substring(0, 30)})`);
+            }
+          }
+
+          // Case 2: WHO -> WHAT block
+          if (!shouldCreateStudyItem) {
+            const linkedWhatBlocks = whoBlock.linkedBlockIds
+              .map(id => blocks.find(b => b.id === id && b.type === 'what'))
+              .filter(Boolean) as Block[];
+
+            if (linkedWhatBlocks.length > 0) {
+              shouldCreateStudyItem = true;
+              relatedBlock = linkedWhatBlocks[0]; // Use first WHAT block
+              console.log(`🔧 Found WHO -> WHAT relationship: WHO(${whoBlock.content?.substring(0, 30)}) -> WHAT(${relatedBlock.content?.substring(0, 30)})`);
+            }
+          }
+        }
+
+        // Create study item for valid WHO blocks
+        if (shouldCreateStudyItem && relatedBlock) {
+          const studyItem: StudyItem = {
+            id: `study-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            blockId: whoBlock.id,
+            noteId: note.id,
+            folderId: note.folderId,
+            type: "who", // Always "who" since we only create study items for WHO blocks
+            nextReview: undefined, // No review date until the item is actually studied
+            suspended: false,
+            // Initialize SRS data
+            interval: 1,
+            repetitions: 0,
+            easeFactor: 2.5,
+            isLearning: true,
+            learningStep: 0,
+          };
+
+          console.log(`🔧 Created study item for WHO block:`, {
+            id: studyItem.id,
+            blockId: whoBlock.id,
+            nextReview: studyItem.nextReview ? new Date(studyItem.nextReview).toISOString() : 'null',
+            whoBlockContent: whoBlock.content?.substring(0, 50),
+            relatedBlockType: relatedBlock.type,
+            relatedBlockContent: relatedBlock.content?.substring(0, 50)
+          });
+
+          studyItems.push(studyItem);
+        } else {
+          console.log(`🔧 Skipped WHO block (no valid relationship): WHO(${whoBlock.content?.substring(0, 30)})`);
         }
       }
 
@@ -117,6 +229,8 @@ export class SpacedRepetitionService {
 
         await db.notes.put(updatedNote);
         console.log(`Added ${studyItems.length} study items to note: ${note.title}`);
+      } else {
+        console.log(`No valid study items created for note: ${note.title}`);
       }
 
       return studyItems;
@@ -136,34 +250,90 @@ export class SpacedRepetitionService {
       const now = Date.now();
       let notes: Note[];
 
+      console.log('🔍 getDueStudyItems called with:', { folderId, now: new Date(now).toISOString() });
+
       if (folderId) {
         notes = await db.notes.where('folderId').equals(folderId).toArray();
+        console.log(`📁 Found ${notes.length} notes in folder ${folderId}`);
       } else {
         notes = await db.notes.toArray();
+        console.log(`📚 Found ${notes.length} total notes`);
       }
 
       const studyItemsWithBlocks: StudyItemWithBlock[] = [];
+      let totalStudyItems = 0;
+      let itemsWithoutBlocks = 0;
+      let suspendedItems = 0;
+      let futureItems = 0;
 
       for (const note of notes) {
         if (note.studyStats?.studyItems) {
+          console.log(`📝 Note "${note.title}" has ${note.studyStats.studyItems.length} study items`);
+
           for (const studyItem of note.studyStats.studyItems) {
-            if (!studyItem.suspended && (studyItem.nextReview || 0) <= now) {
-              const block = note.blocks.find(b => b.id === studyItem.blockId);
-              if (block) {
-                studyItemsWithBlocks.push({
-                  ...studyItem,
-                  block,
-                  note
-                });
-              }
+            totalStudyItems++;
+
+            // Only consider items with valid review dates
+            const hasValidReviewDate = studyItem.nextReview !== null && studyItem.nextReview !== undefined && studyItem.nextReview > 0;
+            const isDue = hasValidReviewDate && studyItem.nextReview! <= now;
+
+            console.log(`  📋 Study item ${studyItem.id}:`, {
+              type: studyItem.type,
+              nextReview: studyItem.nextReview ? new Date(studyItem.nextReview).toISOString() : 'null',
+              suspended: studyItem.suspended,
+              blockId: studyItem.blockId,
+              hasValidReviewDate,
+              isDue: isDue && !studyItem.suspended
+            });
+
+            if (studyItem.suspended) {
+              suspendedItems++;
+              continue;
+            }
+
+            // Skip items without valid review dates
+            if (!hasValidReviewDate) {
+              console.log(`  ⏭️ Skipping item without valid review date: ${studyItem.id}`);
+              continue;
+            }
+
+            // Skip items that are not yet due
+            if (studyItem.nextReview! > now) {
+              futureItems++;
+              continue;
+            }
+
+            const block = note.blocks.find(b => b.id === studyItem.blockId);
+            if (block) {
+              console.log(`  ✅ Found matching block for ${studyItem.blockId}: "${block.content?.substring(0, 50)}..."`);
+              studyItemsWithBlocks.push({
+                ...studyItem,
+                block,
+                note
+              });
+            } else {
+              itemsWithoutBlocks++;
+              console.warn(`  ❌ No matching block found for study item ${studyItem.id} (blockId: ${studyItem.blockId})`);
+              console.warn(`    Available blocks in note:`, note.blocks.map(b => ({ id: b.id, type: b.type, content: b.content?.substring(0, 30) })));
             }
           }
+        } else {
+          console.log(`📝 Note "${note.title}" has no study items`);
         }
       }
 
+      console.log('🔍 getDueStudyItems summary:', {
+        totalStudyItems,
+        dueItemsFound: studyItemsWithBlocks.length,
+        itemsWithoutBlocks,
+        suspendedItems,
+        futureItems,
+        folderId: folderId || 'all'
+      });
+
       return studyItemsWithBlocks.sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
     } catch (error) {
-      console.error('Error getting due study items:', error);
+      console.error('❌ Error getting due study items:', error);
       return [];
     }
   }
@@ -249,32 +419,117 @@ export class SpacedRepetitionService {
         throw new Error('Study item not found');
       }
 
-      // Calculate next review based on rating
-      let newInterval = 1; // Default to 1 day
+      // Initialize SRS data if not present
+      const currentInterval = foundStudyItem.interval || 1;
+      const currentRepetitions = foundStudyItem.repetitions || 0;
+      const currentEaseFactor = foundStudyItem.easeFactor || 2.5;
+      const isCurrentlyLearning = foundStudyItem.isLearning !== false; // Default to learning for new items
+      const currentLearningStep = foundStudyItem.learningStep || 0;
 
-      switch (rating) {
-        case Rating.Again:
-          newInterval = 0; // Review again tomorrow
-          break;
-        case Rating.Hard:
-          newInterval = 1; // Review in 1 day
-          break;
-        case Rating.Good:
-          newInterval = 3; // Review in 3 days
-          break;
-        case Rating.Easy:
-          newInterval = 7; // Review in 1 week
-          break;
-        default:
-          newInterval = 3; // Default to 3 days
-          break;
+      // Learning phase steps (in minutes): 10m, 1 day, 3 days
+      const learningSteps = [10, 1440, 4320]; // 10 minutes, 1 day, 3 days in minutes
+
+      let newInterval: number = 1; // Default to 1 day
+      let newRepetitions = currentRepetitions;
+      let newEaseFactor = currentEaseFactor;
+      let newIsLearning = isCurrentlyLearning;
+      let newLearningStep = currentLearningStep;
+
+      if (isCurrentlyLearning) {
+        // Learning phase algorithm
+        switch (rating) {
+          case Rating.Again:
+            // Reset to first learning step
+            newLearningStep = 0;
+            newInterval = learningSteps[0] / (24 * 60); // Convert to days
+            break;
+
+          case Rating.Hard:
+            // Stay at current step or go back one
+            newLearningStep = Math.max(0, currentLearningStep - 1);
+            newInterval = learningSteps[newLearningStep] / (24 * 60); // Convert to days
+            break;
+
+          case Rating.Good:
+            // Advance to next learning step
+            if (currentLearningStep < learningSteps.length - 1) {
+              newLearningStep = currentLearningStep + 1;
+              newInterval = learningSteps[newLearningStep] / (24 * 60); // Convert to days
+            } else {
+              // Graduate from learning phase
+              newIsLearning = false;
+              newRepetitions = 1;
+              newInterval = 1; // Start with 1 day graduated interval
+            }
+            break;
+
+          case Rating.Easy:
+            // Graduate immediately with longer initial interval
+            newIsLearning = false;
+            newRepetitions = 1;
+            newInterval = 4; // Start with 4 days for easy graduation
+            break;
+        }
+      } else {
+        // Review phase - SM-2 based algorithm
+        switch (rating) {
+          case Rating.Again:
+            // Reset to learning phase
+            newIsLearning = true;
+            newLearningStep = 0;
+            newRepetitions = 0;
+            newInterval = learningSteps[0] / (24 * 60); // 10 minutes
+            // Reduce ease factor
+            newEaseFactor = Math.max(1.3, currentEaseFactor - 0.2);
+            break;
+
+          case Rating.Hard:
+            // Reduce interval and ease factor slightly
+            newInterval = Math.max(1, Math.floor(currentInterval * 1.2));
+            newEaseFactor = Math.max(1.3, currentEaseFactor - 0.15);
+            newRepetitions = currentRepetitions + 1;
+            break;
+
+          case Rating.Good:
+            // Standard SM-2 progression
+            if (newRepetitions === 1) {
+              newInterval = 6; // Second review after 6 days
+            } else {
+              newInterval = Math.round(currentInterval * currentEaseFactor);
+            }
+            newRepetitions = currentRepetitions + 1;
+            break;
+
+          case Rating.Easy:
+            // Faster progression with ease factor increase
+            if (newRepetitions === 1) {
+              newInterval = 6; // Second review after 6 days
+            } else {
+              newInterval = Math.round(currentInterval * currentEaseFactor * 1.3); // 30% bonus
+            }
+            newEaseFactor = Math.min(4.0, currentEaseFactor + 0.1); // Increase ease
+            newRepetitions = currentRepetitions + 1;
+            break;
+        }
       }
 
       // Calculate next review time
-      const nextReviewTime = Date.now() + (newInterval * 24 * 60 * 60 * 1000);
+      const intervalInMs = newInterval < 1
+        ? newInterval * 24 * 60 * 60 * 1000 // For sub-day intervals (learning phase)
+        : newInterval * 24 * 60 * 60 * 1000; // For day intervals
 
-      // Update the study item with new next review time
-      const updatedStudyItem = { ...foundStudyItem, nextReview: nextReviewTime };
+      const nextReviewTime = Date.now() + intervalInMs;
+
+      // Update the study item with new SRS data
+      const updatedStudyItem = {
+        ...foundStudyItem,
+        nextReview: nextReviewTime,
+        interval: newInterval,
+        repetitions: newRepetitions,
+        easeFactor: newEaseFactor,
+        isLearning: newIsLearning,
+        learningStep: newLearningStep
+      };
 
       // Update the note's studyStats
       const updatedStudyItems = foundNote.studyStats!.studyItems!.map(item =>
@@ -409,6 +664,76 @@ export class SpacedRepetitionService {
     } catch (error) {
       console.error('Error getting review history:', error);
       return [];
+    }
+  }
+
+  /**
+ * Ensure study items exist for notes with valid WHO block relationships
+ */
+  static async ensureStudyItemsExist(): Promise<void> {
+    try {
+      await this.ensureDatabaseReady();
+
+      console.log('🔧 Ensuring study items exist for all notes...');
+      const notes = await db.notes.toArray();
+      let notesUpdated = 0;
+
+      for (const note of notes) {
+        const whoBlocks = note.blocks.filter(b => b.type === 'who');
+
+        // Only process notes that have WHO blocks with valid relationships
+        if (whoBlocks.length > 0) {
+          let hasValidRelationships = false;
+
+          // Check if any WHO block has valid relationships
+          for (const whoBlock of whoBlocks) {
+            if (whoBlock.linkedBlockIds && whoBlock.linkedBlockIds.length > 0) {
+              // Check for WHO -> terminal HOW relationship
+              const linkedHowBlocks = whoBlock.linkedBlockIds
+                .map(id => note.blocks.find(b => b.id === id && b.type === 'how'))
+                .filter(Boolean) as Block[];
+
+              if (linkedHowBlocks.length === 1) {
+                const howBlock = linkedHowBlocks[0];
+                const howLinksToOtherHow = howBlock.linkedBlockIds?.some(id =>
+                  note.blocks.find(b => b.id === id && b.type === 'how')
+                );
+                if (!howLinksToOtherHow) {
+                  hasValidRelationships = true;
+                  break;
+                }
+              }
+
+              // Check for WHO -> WHAT relationship
+              const linkedWhatBlocks = whoBlock.linkedBlockIds
+                .map(id => note.blocks.find(b => b.id === id && b.type === 'what'))
+                .filter(Boolean) as Block[];
+
+              if (linkedWhatBlocks.length > 0) {
+                hasValidRelationships = true;
+                break;
+              }
+            }
+          }
+
+          if (hasValidRelationships) {
+            // Check if note already has study items
+            if (!note.studyStats?.studyItems || note.studyStats.studyItems.length === 0) {
+              console.log(`🔧 Creating study items for note: ${note.title}`);
+              await this.createStudyItemsFromBlocks(note.blocks, note);
+              notesUpdated++;
+            } else {
+              console.log(`🔧 Note ${note.title} already has ${note.studyStats.studyItems.length} study items`);
+            }
+          } else {
+            console.log(`🔧 Note ${note.title} has WHO blocks but no valid relationships for study items`);
+          }
+        }
+      }
+
+      console.log(`🔧 Ensured study items exist: ${notesUpdated} notes updated`);
+    } catch (error) {
+      console.error('❌ Error ensuring study items exist:', error);
     }
   }
 
@@ -552,6 +877,378 @@ export class SpacedRepetitionService {
       return false;
     }
   }
+
+  /**
+   * Clear all existing study items and regenerate them with correct logic
+   */
+  static async regenerateAllStudyItems(): Promise<void> {
+    try {
+      await this.ensureDatabaseReady();
+
+      console.log('🔧 Regenerating all study items with correct logic...');
+      const notes = await db.notes.toArray();
+      let notesUpdated = 0;
+
+      for (const note of notes) {
+        // Clear existing study items
+        if (note.studyStats?.studyItems) {
+          console.log(`🔧 Clearing ${note.studyStats.studyItems.length} existing study items from note: ${note.title}`);
+
+          const updatedNote = {
+            ...note,
+            studyStats: {
+              ...note.studyStats,
+              studyItems: []
+            }
+          };
+
+          await db.notes.put(updatedNote);
+        }
+
+        // Regenerate study items with correct logic
+        await this.createStudyItemsFromBlocks(note.blocks, note);
+        notesUpdated++;
+      }
+
+      console.log(`🔧 Regenerated study items for ${notesUpdated} notes`);
+    } catch (error) {
+      console.error('❌ Error regenerating study items:', error);
+    }
+  }
+
+  /**
+   * Fix all study items that are incorrectly due today by spreading them out over future dates
+   */
+  static async fixIncorrectDueDates(): Promise<void> {
+    try {
+      await this.ensureDatabaseReady();
+
+      console.log('🔧 Fixing incorrect due dates for study items...');
+      const notes = await db.notes.toArray();
+      const now = Date.now();
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      let totalFixed = 0;
+
+      for (const note of notes) {
+        if (note.studyStats?.studyItems) {
+          let noteUpdated = false;
+          const updatedStudyItems = note.studyStats.studyItems.map((item, index) => {
+            // If item is due today or in the past, spread it out over the next few days
+            if ((item.nextReview || 0) <= now + oneDayMs) {
+              // Spread items over the next 1-7 days randomly
+              const daysToAdd = Math.floor(Math.random() * 7) + 1;
+              const newDueDate = now + (daysToAdd * oneDayMs);
+
+              console.log(`🔧 Fixing due date for item in note "${note.title}": ${new Date(item.nextReview || 0).toISOString()} → ${new Date(newDueDate).toISOString()}`);
+
+              noteUpdated = true;
+              totalFixed++;
+
+              return {
+                ...item,
+                nextReview: newDueDate
+              };
+            }
+            return item;
+          });
+
+          if (noteUpdated) {
+            const updatedNote = {
+              ...note,
+              studyStats: {
+                ...note.studyStats,
+                studyItems: updatedStudyItems
+              }
+            };
+
+            await db.notes.put(updatedNote);
+            console.log(`🔧 Updated due dates for note: ${note.title}`);
+          }
+        }
+      }
+
+      console.log(`🔧 Fixed ${totalFixed} study items with incorrect due dates`);
+    } catch (error) {
+      console.error('❌ Error fixing due dates:', error);
+    }
+  }
+
+  /**
+   * Clear all review dates from study items that haven't been actually studied
+   */
+  static async clearAllReviewDates(): Promise<void> {
+    try {
+      await this.ensureDatabaseReady();
+
+      console.log('🔧 Clearing all review dates from unstudied items...');
+      const notes = await db.notes.toArray();
+      let totalCleared = 0;
+
+      for (const note of notes) {
+        if (note.studyStats?.studyItems) {
+          let noteUpdated = false;
+          const updatedStudyItems = note.studyStats.studyItems.map(item => {
+            // Clear the nextReview date - items should only have dates after being studied
+            if (item.nextReview) {
+              console.log(`🔧 Clearing review date for item in note "${note.title}": ${new Date(item.nextReview).toISOString()}`);
+              noteUpdated = true;
+              totalCleared++;
+
+              return {
+                ...item,
+                nextReview: undefined
+              };
+            }
+            return item;
+          });
+
+          if (noteUpdated) {
+            const updatedNote = {
+              ...note,
+              studyStats: {
+                ...note.studyStats,
+                studyItems: updatedStudyItems
+              }
+            };
+
+            await db.notes.put(updatedNote);
+            console.log(`🔧 Cleared review dates for note: ${note.title}`);
+          }
+        }
+      }
+
+      console.log(`🔧 Cleared ${totalCleared} review dates from unstudied items`);
+    } catch (error) {
+      console.error('❌ Error clearing review dates:', error);
+    }
+  }
+
+  /**
+   * Debug function to analyze study items and their dates
+   */
+  static async debugStudyItemDates(): Promise<void> {
+    try {
+      await this.ensureDatabaseReady();
+
+      console.log('🔍 Debugging study item dates...');
+      const now = Date.now();
+      const oneDayMs = 24 * 60 * 60 * 1000;
+
+      const allStudyItems = await this.getStudyItems();
+      console.log(`📊 Total study items found: ${allStudyItems.length}`);
+
+      let dueToday = 0;
+      let upcoming = 0;
+      let withoutDates = 0;
+      let suspended = 0;
+      let nullDates = 0;
+      let zeroDates = 0;
+      let undefinedDates = 0;
+
+      const dateBreakdown: { [key: string]: number } = {};
+
+      allStudyItems.forEach((item, index) => {
+        const nextReview = item.nextReview;
+
+        if (item.suspended) {
+          suspended++;
+          return;
+        }
+
+        // More detailed analysis of missing dates
+        if (nextReview === null) {
+          nullDates++;
+          withoutDates++;
+          if (index < 5) console.log(`📋 Item with NULL date: ${item.id} in note "${item.note.title}"`);
+          return;
+        }
+
+        if (nextReview === undefined) {
+          undefinedDates++;
+          withoutDates++;
+          if (index < 5) console.log(`📋 Item with UNDEFINED date: ${item.id} in note "${item.note.title}"`);
+          return;
+        }
+
+        if (nextReview === 0) {
+          zeroDates++;
+          withoutDates++;
+          if (index < 5) console.log(`📋 Item with ZERO date: ${item.id} in note "${item.note.title}"`);
+          return;
+        }
+
+        const reviewDate = new Date(nextReview);
+        const dayKey = reviewDate.toDateString();
+        dateBreakdown[dayKey] = (dateBreakdown[dayKey] || 0) + 1;
+
+        if (nextReview <= now + oneDayMs) {
+          dueToday++;
+        } else {
+          upcoming++;
+        }
+
+        if (index < 10) {
+          console.log(`📋 Item ${index + 1}: ${item.note.title} - Due: ${reviewDate.toISOString()}`);
+        }
+      });
+
+      console.log('📊 Study Items Summary:');
+      console.log(`  Due today/past: ${dueToday}`);
+      console.log(`  Upcoming (with valid dates): ${upcoming}`);
+      console.log(`  Without dates (total): ${withoutDates}`);
+      console.log(`    - NULL dates: ${nullDates}`);
+      console.log(`    - UNDEFINED dates: ${undefinedDates}`);
+      console.log(`    - ZERO dates: ${zeroDates}`);
+      console.log(`  Suspended: ${suspended}`);
+
+      console.log('📅 Date breakdown:');
+      Object.entries(dateBreakdown)
+        .sort()
+        .forEach(([date, count]) => {
+          console.log(`  ${date}: ${count} items`);
+        });
+
+    } catch (error) {
+      console.error('❌ Error debugging study item dates:', error);
+    }
+  }
+
+  /**
+   * Simulate spaced repetition intervals for different rating patterns
+   */
+  static simulateSpacedRepetitionIntervals(): any {
+    console.log('🧮 Simulating Spaced Repetition Intervals...');
+
+    const startDate = Date.now();
+    const simulation = {
+      startDate: new Date(startDate).toLocaleDateString(),
+      scenarios: {} as any
+    };
+
+    // Define rating scenarios
+    const scenarios = [
+      { name: 'Perfect Student (All Easy)', ratings: [Rating.Easy, Rating.Easy, Rating.Easy, Rating.Easy, Rating.Easy] },
+      { name: 'Good Student (Mostly Good)', ratings: [Rating.Good, Rating.Good, Rating.Easy, Rating.Good, Rating.Easy] },
+      { name: 'Struggling Student (Mixed)', ratings: [Rating.Hard, Rating.Good, Rating.Hard, Rating.Good, Rating.Good] },
+      { name: 'Difficult Card (Many Again)', ratings: [Rating.Again, Rating.Hard, Rating.Again, Rating.Good, Rating.Good] },
+      { name: 'Consistent Good', ratings: [Rating.Good, Rating.Good, Rating.Good, Rating.Good, Rating.Good] }
+    ];
+
+    scenarios.forEach(scenario => {
+      let currentDate = startDate;
+      const reviews: any[] = [];
+      let interval = 1; // Start with 1 day base interval
+
+      // Track SRS state for simulation
+      let repetitions = 0;
+      let easeFactor = 2.5;
+      let isLearning = true;
+      let learningStep = 0;
+
+      scenario.ratings.forEach((rating, index) => {
+        const learningSteps = [10 / 1440, 1, 3]; // 10 minutes, 1 day, 3 days (in days)
+
+        if (isLearning) {
+          // Learning phase
+          switch (rating) {
+            case Rating.Again:
+              learningStep = 0;
+              interval = learningSteps[0];
+              break;
+            case Rating.Hard:
+              learningStep = Math.max(0, learningStep - 1);
+              interval = learningSteps[learningStep];
+              break;
+            case Rating.Good:
+              if (learningStep < learningSteps.length - 1) {
+                learningStep++;
+                interval = learningSteps[learningStep];
+              } else {
+                // Graduate from learning
+                isLearning = false;
+                repetitions = 1;
+                interval = 1;
+              }
+              break;
+            case Rating.Easy:
+              // Graduate immediately
+              isLearning = false;
+              repetitions = 1;
+              interval = 4;
+              break;
+          }
+        } else {
+          // Review phase - SM-2 based
+          switch (rating) {
+            case Rating.Again:
+              isLearning = true;
+              learningStep = 0;
+              repetitions = 0;
+              interval = learningSteps[0];
+              easeFactor = Math.max(1.3, easeFactor - 0.2);
+              break;
+            case Rating.Hard:
+              interval = Math.max(1, Math.floor(interval * 1.2));
+              easeFactor = Math.max(1.3, easeFactor - 0.15);
+              repetitions++;
+              break;
+            case Rating.Good:
+              if (repetitions === 1) {
+                interval = 6;
+              } else {
+                interval = Math.round(interval * easeFactor);
+              }
+              repetitions++;
+              break;
+            case Rating.Easy:
+              if (repetitions === 1) {
+                interval = 6;
+              } else {
+                interval = Math.round(interval * easeFactor * 1.3);
+              }
+              easeFactor = Math.min(4.0, easeFactor + 0.1);
+              repetitions++;
+              break;
+          }
+        }
+
+        currentDate = currentDate + (interval * 24 * 60 * 60 * 1000);
+
+        reviews.push({
+          reviewNumber: index + 1,
+          rating: this.getRatingName(rating),
+          interval: interval < 1 ? `${Math.round(interval * 1440)} min` : `${Math.round(interval)} day${Math.round(interval) !== 1 ? 's' : ''}`,
+          nextReviewDate: new Date(currentDate).toLocaleDateString(),
+          daysFromStart: Math.ceil((currentDate - startDate) / (24 * 60 * 60 * 1000)),
+          phase: isLearning ? 'Learning' : 'Review',
+          easeFactor: Math.round(easeFactor * 100) / 100,
+          repetitions
+        });
+      });
+
+      simulation.scenarios[scenario.name] = {
+        ratings: scenario.ratings.map(r => this.getRatingName(r)),
+        reviews,
+        totalDaysSpanned: Math.ceil((currentDate - startDate) / (24 * 60 * 60 * 1000))
+      };
+    });
+
+    console.log('📈 Spaced Repetition Simulation Results:', simulation);
+    return simulation;
+  }
+
+  /**
+   * Get rating name for display
+   */
+  private static getRatingName(rating: Rating): string {
+    switch (rating) {
+      case Rating.Again: return 'Again';
+      case Rating.Hard: return 'Hard';
+      case Rating.Good: return 'Good';
+      case Rating.Easy: return 'Easy';
+      default: return 'Unknown';
+    }
+  }
 }
 
 // Make debug functions available globally for browser console access
@@ -562,4 +1259,12 @@ if (typeof window !== 'undefined') {
   (window as any).initializeDatabase = () => SpacedRepetitionService.initializeDatabase();
   (window as any).checkDatabaseHealth = () => SpacedRepetitionService.checkDatabaseSchema();
   (window as any).upgradeDatabase = () => SpacedRepetitionService.ensureDatabaseReady();
+  (window as any).ensureStudyItemsExist = () => SpacedRepetitionService.ensureStudyItemsExist();
+  (window as any).getDueStudyItems = (folderId?: string) => SpacedRepetitionService.getDueStudyItems(folderId);
+  (window as any).getStudyItems = (noteId?: string, folderId?: string) => SpacedRepetitionService.getStudyItems(noteId, folderId);
+  (window as any).regenerateAllStudyItems = () => SpacedRepetitionService.regenerateAllStudyItems();
+  (window as any).fixIncorrectDueDates = () => SpacedRepetitionService.fixIncorrectDueDates();
+  (window as any).debugStudyItemDates = () => SpacedRepetitionService.debugStudyItemDates();
+  (window as any).clearAllReviewDates = () => SpacedRepetitionService.clearAllReviewDates();
+  (window as any).simulateIntervals = () => SpacedRepetitionService.simulateSpacedRepetitionIntervals();
 }
