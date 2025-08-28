@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from "react"
 import {
-  BookOpen,
   Clock,
   TrendingUp,
   Target,
@@ -811,7 +810,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                   <div className="flex items-center gap-6 text-sm">
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <div className="flex items-center justify-center w-6 h-6 bg-green-50 dark:bg-green-950/30 rounded border border-green-200/50 dark:border-green-800/30">
-                        <BookOpen className="w-3.5 h-3.5 text-green-600" />
+                        <Layers className="w-3.5 h-3.5 text-green-600" />
                       </div>
                       <span className="text-xs font-medium">{folderStudyItems} study items</span>
                     </div>
@@ -1318,7 +1317,7 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                     {filteredStats.dueItems} items due
                   </span>
                   <span className="flex items-center gap-1">
-                    <BookOpen className="w-4 h-4" />
+                    <Layers className="w-4 h-4" />
                     {filteredStats.studyItems} total items
                   </span>
                 </div>
