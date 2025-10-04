@@ -28,13 +28,14 @@ import type { VirtuosoHandle } from 'react-virtuoso'
 interface EditorProps {
   note: Note
   updateNote: (note: Note) => void
+  targetBlockId?: string | null
 }
 
 // Memoized BlockEditor component to prevent unnecessary re-renders
 const MemoizedBlockEditor = React.memo(BlockEditor)
 const MemoizedBlockPreview = React.memo(BlockPreview)
 
-export default function Editor({ note, updateNote }: EditorProps) {
+export default function Editor({ note, updateNote, targetBlockId }: EditorProps) {
   const [editingTitle, setEditingTitle] = useState(false)
   const [title, setTitle] = useState(note.title)
   const [blocks, setBlocks] = useState<Block[]>(note.blocks)
@@ -67,6 +68,23 @@ export default function Editor({ note, updateNote }: EditorProps) {
 
   const { getExistingWhereBlocks } = useWhereBlock(blocks)
   const { getExistingWhenBlocks } = useWhenBlock(blocks)
+
+  // Handle scrolling to target block
+  useEffect(() => {
+    if (targetBlockId && virtuosoRef.current) {
+      const blockIndex = blocks.findIndex(block => block.id === targetBlockId)
+      if (blockIndex !== -1) {
+        // Small delay to ensure the editor is fully rendered
+        setTimeout(() => {
+          virtuosoRef.current?.scrollToIndex({
+            index: blockIndex,
+            align: 'center',
+            behavior: 'smooth'
+          })
+        }, 100)
+      }
+    }
+  }, [targetBlockId, blocks])
 
   // Optimized initial load - only run migrations if absolutely necessary
   useEffect(() => {

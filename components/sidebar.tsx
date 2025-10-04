@@ -24,6 +24,7 @@ import {
   Bot, // Add Bot icon for semantic agents
   BookOpen, // Add BookOpen icon for review button
   Lightbulb, // Add Lightbulb icon for spaced repetition review
+  List, // Add List icon for tasks
 } from "lucide-react"
 import {
   DndContext,
@@ -107,6 +108,7 @@ interface SidebarProps {
   toggleFavorite: (itemId: string, itemType: 'folder' | 'note') => void
   onSemanticAgentsClick: () => void // <-- add this
   onReviewClick: () => void // <-- add this
+  onTasksClick: () => void // <-- add this
 }
 
 // Custom alphanumeric sort: numbers first, then letters (case-insensitive)
@@ -150,6 +152,7 @@ export default function Sidebar({
   toggleFavorite,
   onSemanticAgentsClick,
   onReviewClick,
+  onTasksClick,
 }: SidebarProps) {
   const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
     root: true,
@@ -750,6 +753,17 @@ export default function Sidebar({
               onClick={onReviewClick}
             >
               <Lightbulb className="h-6 w-6 ml-1" />
+            </button>
+            {/* All Tasks button */}
+            <button
+              className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-accent/20 text-muted-foreground mt-1 pt-2 mt-3"
+              title="All Tasks"
+              aria-label="All Tasks"
+              type="button"
+              style={{ background: 'none', border: 'none', padding: 0 }}
+              onClick={onTasksClick}
+            >
+              <List className="h-5 w-5 ml-1" />
             </button>
             {/* Home/Dashboard button */}
             {/* <div

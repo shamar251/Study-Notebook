@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Plus, Search, Settings, BookOpen, Brain, Save, FolderOpen, Trash2, MoreHorizontal, ArrowLeft } from "lucide-react"
+import { Plus, Search, Settings, BookOpen, Brain, Save, FolderOpen, Trash2, MoreHorizontal, ArrowLeft, List } from "lucide-react"
 import { useNotes, useFolders, addNote, updateNote, deleteNote, addFolder, updateFolder, deleteFolder, searchNotes, getAllChildFolderIds } from "@/hooks/use-db"
 import { initializeDatabase, db, getNextOrder, recordOperation, reorderItems, updateFolderPath, type Note as DBNote, type Folder as DBFolder, moveToTrash, restoreFromTrash, permanentDelete, toggleFavorite, type Block } from "@/lib/db"
 import Sidebar from "@/components/sidebar"
@@ -30,6 +30,8 @@ import { HTML5Backend } from 'react-dnd-html5-backend'
 import NoteDashboard from "@/components/note-dashboard";
 import SemanticFolderAgents from "@/components/semantic-folder-agents"
 import ReviewPage from "@/components/review-page"
+import NoteTasksTab from "@/components/note-tasks-tab"
+import TaskTab from "@/components/task-tab"
 
 export type Note = DBNote
 
@@ -42,7 +44,7 @@ export default function NoteApp() {
   const [activeNote, setActiveNote] = useState<Note | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
-  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | "semantic-agents" | "review" | null>(null);
+  const [view, setView] = useState<"editor" | "flashcards" | "quiz" | "test" | "view" | "semantic-agents" | "review" | "note-tasks" | "tasks" | null>(null);
   const [showStudyModeSelector, setShowStudyModeSelector] = useState(false);
   const [folderNotes, setFolderNotes] = useState<Note[]>([])
   const { theme, setTheme } = useTheme();
@@ -58,6 +60,7 @@ export default function NoteApp() {
   const [noteTestSession, setNoteTestSession] = useState<any>(null);
   const [isElectron, setIsElectron] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
+  const [targetBlockId, setTargetBlockId] = useState<string | null>(null);
 
   useEffect(() => {
     // Initialize database with default data if empty
@@ -842,6 +845,12 @@ export default function NoteApp() {
     await updateNoteHandler(updatedNote);
   };
 
+  const handleNavigateToBlock = (blockId: string) => {
+    setTargetBlockId(blockId);
+    // Clear the target after a short delay to allow the editor to process it
+    setTimeout(() => setTargetBlockId(null), 1000);
+  };
+
   // Handler for Test tab/button
   const handleTestTab = () => {
     if (activeNote) {
@@ -969,6 +978,7 @@ export default function NoteApp() {
           toggleFavorite={handleToggleFavorite}
           onSemanticAgentsClick={() => { setView('semantic-agents'); setActiveNote(null); setShowStudyModeSelector(false); }}
           onReviewClick={() => { setView('review'); setActiveNote(null); setShowStudyModeSelector(false); }}
+          onTasksClick={() => { setView('tasks'); setActiveNote(null); setShowStudyModeSelector(false); }}
         />
         <main className={`flex-1 flex flex-col ${view === 'review' ? 'overflow-y-auto' : 'overflow-hidden'}`}>
           {activeNote && !showStudyModeSelector && (
@@ -989,6 +999,9 @@ export default function NoteApp() {
                     <TabsTrigger value="flashcards">Flashcards</TabsTrigger>
                     <TabsTrigger value="quiz" onClick={handleQuizTab} disabled={!activeNote}>Quiz</TabsTrigger>
                     <TabsTrigger value="test" onClick={handleTestTab} disabled={!activeNote}>Test</TabsTrigger>
+                    <TabsTrigger value="note-tasks" disabled={!activeNote} title="Tasks">
+                      <List className="w-5 h-5" />
+                    </TabsTrigger>
                   </TabsList>
                   <div className="flex items-center">
                     <DropdownMenu>
@@ -1025,7 +1038,7 @@ export default function NoteApp() {
                 </TabsContent>
 
                 <TabsContent value="editor" className="flex-1 p-0 m-0 h-full overflow-hidden">
-                  <Editor note={activeNote} updateNote={updateNoteHandler} />
+                  <Editor note={activeNote} updateNote={updateNoteHandler} targetBlockId={targetBlockId} />
                 </TabsContent>
 
                 <TabsContent value="flashcards" className="flex-1 p-0 m-0 h-full overflow-hidden">
@@ -1043,6 +1056,14 @@ export default function NoteApp() {
                     onComplete={(noteId, score, total) =>
                       updateStudyStats(noteId, "quiz", undefined, score, total)
                     }
+                  />
+                </TabsContent>
+
+                <TabsContent value="note-tasks" className="flex-1 p-0 m-0 h-full overflow-hidden">
+                  <NoteTasksTab
+                    note={activeNote}
+                    onUpdateNote={updateNoteHandler}
+                    onNavigateToBlock={handleNavigateToBlock}
                   />
                 </TabsContent>
 
@@ -1085,6 +1106,7 @@ export default function NoteApp() {
                     />
                   )}
                 </TabsContent>
+
 
                 <TabsContent value="review" className="flex-1 p-0 m-0 h-full overflow-hidden">
                   <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} />
@@ -1274,6 +1296,17 @@ export default function NoteApp() {
           {view === 'semantic-agents' && (
             <SemanticFolderAgents />
           )}
+
+          {view === 'tasks' && (
+            <TaskTab
+              notes={notes}
+              folders={folders}
+              onNoteClick={openNote}
+              onUpdateNote={updateNoteHandler}
+              onNavigateToBlock={handleNavigateToBlock}
+            />
+          )}
+
 
           {view === 'review' && activeNote && (
             <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
