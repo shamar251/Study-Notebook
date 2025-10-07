@@ -74,6 +74,49 @@ function getOrderedHowBlocksForWho(whoBlock: Block, allBlocks: Block[]): Block[]
     .sort((a, b) => allBlocks.indexOf(a) - allBlocks.indexOf(b));
 }
 
+// Debug function to inspect study items and their relationships
+export function debugStudyItems(studyItems: StudyItemWithBlock[]) {
+  console.log('=== STUDY ITEMS DEBUG ===');
+  console.log(`Total study items: ${studyItems.length}`);
+
+  studyItems.forEach((item, index) => {
+    console.log(`\n--- Study Item ${index + 1} ---`);
+    console.log(`ID: ${item.id}`);
+    console.log(`Type: ${item.type}`);
+    console.log(`Block ID: ${item.blockId}`);
+    console.log(`Note ID: ${item.noteId}`);
+    console.log(`Note Title: ${item.note?.title || 'Unknown'}`);
+    console.log(`Block Content: ${item.block?.content?.substring(0, 100) || 'No content'}`);
+    console.log(`Has Block: ${!!item.block}`);
+    console.log(`Has Note: ${!!item.note}`);
+
+    if (item.block && item.note) {
+      const noteBlocks = item.note.blocks;
+      console.log(`Note has ${noteBlocks.length} blocks total`);
+
+      if (item.type === 'who') {
+        const howBlocks = getOrderedHowBlocksForWho(item.block, noteBlocks);
+        console.log(`Found ${howBlocks.length} HOW blocks for this WHO block`);
+
+        const linkedWhatBlocks = Array.isArray(item.block.linkedBlockIds) && item.block.linkedBlockIds.length > 0
+          ? item.block.linkedBlockIds
+            .map(id => noteBlocks.find(b => b.id === id && b.type === "what" && b.content && b.content.trim() !== ""))
+            .filter(Boolean) as Block[]
+          : [];
+        console.log(`Found ${linkedWhatBlocks.length} linked WHAT blocks`);
+      } else if (item.type === 'what') {
+        const whoBlock = noteBlocks.find((b: Block) => b.type === "who" && b.linkedBlockIds?.includes(item.blockId));
+        console.log(`Found WHO block that links to this WHAT: ${!!whoBlock}`);
+        if (whoBlock) {
+          console.log(`WHO block content: ${whoBlock.content?.substring(0, 50) || 'No content'}`);
+        }
+      }
+    }
+  });
+
+  console.log('=== END DEBUG ===');
+}
+
 export default function FlashcardView({ note, notes, folderName, studyItems, onComplete }: FlashcardViewProps) {
   const [flashcards, setFlashcards] = useState<Flashcard[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -194,10 +237,21 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
         type: item.type,
         blockId: item.blockId,
         noteId: item.noteId,
-        noteTitle: item.note?.title || 'Unknown'
+        noteTitle: item.note?.title || 'Unknown',
+        blockContent: item.block?.content?.substring(0, 50) || 'No content',
+        hasBlock: !!item.block,
+        hasNote: !!item.note
       })))
 
       studyItems.forEach((studyItem) => {
+        console.log(`[FlashcardView] Processing study item ${studyItem.id}:`, {
+          type: studyItem.type,
+          hasBlock: !!studyItem.block,
+          hasNote: !!studyItem.note,
+          blockContent: studyItem.block?.content?.substring(0, 50) || 'No content',
+          noteTitle: studyItem.note?.title || 'No note'
+        });
+
         if (studyItem.block && studyItem.note) {
           // Create flashcard from the specific study item
           if (studyItem.type === "who" && studyItem.block.content) {
@@ -205,9 +259,12 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
             const noteBlocks = studyItem.note.blocks;
             const howBlocks = getOrderedHowBlocksForWho(studyItem.block, noteBlocks);
 
+            console.log(`[FlashcardView] WHO block "${studyItem.block.content.substring(0, 30)}" found ${howBlocks.length} HOW blocks`);
+
             if (howBlocks.length === 1) {
               const singleHowBlock = howBlocks[0];
               if (singleHowBlock.content) {
+                console.log(`[FlashcardView] Creating flashcard: WHO -> single HOW`);
                 cards.push({
                   front: studyItem.block.content,
                   back: singleHowBlock.content,
@@ -219,8 +276,11 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
                   whatMath: singleHowBlock.math,
                   hint: "how #1"
                 });
+              } else {
+                console.log(`[FlashcardView] Single HOW block has no content`);
               }
             } else if (howBlocks.length > 1) {
+              console.log(`[FlashcardView] Creating flashcards for ${howBlocks.length} HOW blocks`);
               // Multiple HOW blocks - create a card for each
               howBlocks.forEach((howBlock, index) => {
                 if (howBlock.content && studyItem.block.content) {
@@ -237,13 +297,62 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
                   });
                 }
               });
+            } else {
+              console.log(`[FlashcardView] No HOW blocks found for WHO block, trying WHAT blocks fallback`);
+
+              // Fallback: Try to find WHAT blocks linked to this WHO block
+              const linkedWhatBlocks = Array.isArray(studyItem.block.linkedBlockIds) && studyItem.block.linkedBlockIds.length > 0
+                ? studyItem.block.linkedBlockIds
+                  .map(id => noteBlocks.find(b => b.id === id && b.type === "what" && b.content && b.content.trim() !== ""))
+                  .filter(Boolean) as Block[]
+                : [];
+
+              console.log(`[FlashcardView] Found ${linkedWhatBlocks.length} linked WHAT blocks`);
+
+              if (linkedWhatBlocks.length > 0) {
+                linkedWhatBlocks.forEach((whatBlock, index) => {
+                  if (whatBlock.content && studyItem.block.content) {
+                    console.log(`[FlashcardView] Creating flashcard: WHO -> WHAT (fallback)`);
+                    cards.push({
+                      front: studyItem.block.content,
+                      back: whatBlock.content,
+                      frontImage: studyItem.block.image,
+                      backImage: whatBlock.image,
+                      noteId: (studyItem.noteId || studyItem.note.id) as string,
+                      noteTitle: studyItem.note.title,
+                      math: studyItem.block.math === true,
+                      whatMath: whatBlock.math,
+                      hint: linkedWhatBlocks.length > 1 ? `what #${index + 1}` : undefined
+                    });
+                  }
+                });
+              } else {
+                console.log(`[FlashcardView] No linked WHAT blocks found either - trying final fallback`);
+
+                // Final fallback: Create a simple flashcard with just the WHO block content
+                // This ensures we always have something to review, even if it's not ideal
+                console.log(`[FlashcardView] Creating fallback flashcard with WHO block only`);
+                cards.push({
+                  front: studyItem.block.content,
+                  back: "Review the content above",
+                  frontImage: studyItem.block.image,
+                  backImage: undefined,
+                  noteId: (studyItem.noteId || studyItem.note.id) as string,
+                  noteTitle: studyItem.note.title,
+                  math: studyItem.block.math === true,
+                  whatMath: false,
+                  hint: "fallback"
+                });
+              }
             }
           } else if (studyItem.type === "what" && studyItem.block.content) {
+            console.log(`[FlashcardView] Processing WHAT block: "${studyItem.block.content.substring(0, 30)}"`);
             // For WHAT blocks, we need to find the corresponding WHO block
             const noteBlocks = studyItem.note.blocks;
             const whoBlock = noteBlocks.find((b: Block) => b.type === "who" && b.linkedBlockIds?.includes(studyItem.blockId));
 
             if (whoBlock && whoBlock.content) {
+              console.log(`[FlashcardView] Creating flashcard: WHO -> WHAT`);
               cards.push({
                 front: whoBlock.content,
                 back: studyItem.block.content,
@@ -255,8 +364,51 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
                 whatMath: studyItem.block.math,
                 hint: undefined
               });
+            } else {
+              console.log(`[FlashcardView] No WHO block found that links to this WHAT block - creating fallback`);
+
+              // Fallback: Create a flashcard with just the WHAT block content
+              console.log(`[FlashcardView] Creating fallback flashcard with WHAT block only`);
+              cards.push({
+                front: "What is this?",
+                back: studyItem.block.content,
+                frontImage: undefined,
+                backImage: studyItem.block.image,
+                noteId: studyItem.noteId || studyItem.note.id,
+                noteTitle: studyItem.note.title,
+                math: false,
+                whatMath: studyItem.block.math,
+                hint: "fallback"
+              });
+            }
+          } else {
+            console.log(`[FlashcardView] Study item ${studyItem.id} cannot generate flashcard:`, {
+              type: studyItem.type,
+              hasContent: !!studyItem.block?.content,
+              blockContent: studyItem.block?.content?.substring(0, 30) || 'No content'
+            });
+
+            // Even if the block has no content, create a minimal flashcard to avoid empty review sessions
+            if (studyItem.block && studyItem.note) {
+              console.log(`[FlashcardView] Creating minimal fallback flashcard for study item without content`);
+              cards.push({
+                front: `Study item from ${studyItem.note.title}`,
+                back: studyItem.block.content || "No content available",
+                frontImage: undefined,
+                backImage: studyItem.block.image,
+                noteId: studyItem.noteId || studyItem.note.id,
+                noteTitle: studyItem.note.title,
+                math: false,
+                whatMath: false,
+                hint: "minimal"
+              });
             }
           }
+        } else {
+          console.log(`[FlashcardView] Study item ${studyItem.id} missing block or note:`, {
+            hasBlock: !!studyItem.block,
+            hasNote: !!studyItem.note
+          });
         }
       });
     } else if (note) {
@@ -269,7 +421,10 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
       })
     }
 
-    console.log(`Generated ${cards.length} flashcards`)
+    console.log(`[FlashcardView] Generated ${cards.length} flashcards from ${studyItems?.length || 0} study items`)
+    if (cards.length === 0 && studyItems && studyItems.length > 0) {
+      console.warn(`[FlashcardView] WARNING: No flashcards generated despite having ${studyItems.length} study items!`);
+    }
     // Shuffle the cards
     const shuffled = [...cards].sort(() => Math.random() - 0.5)
     setFlashcards(shuffled)
@@ -278,6 +433,14 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
     setCompleted(false)
     setProgress(0)
   }, [note, notes, studyItems])
+
+  // Make debug function available globally for console debugging
+  useEffect(() => {
+    if (typeof window !== 'undefined' && studyItems) {
+      (window as any).debugStudyItems = () => debugStudyItems(studyItems);
+      console.log('Debug function available: window.debugStudyItems()');
+    }
+  }, [studyItems]);
 
   useEffect(() => {
     // Update progress
