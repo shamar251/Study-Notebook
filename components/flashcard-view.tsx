@@ -458,40 +458,105 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
     // Store the rating for this card
     setCardRatings(prev => new Map(prev).set(currentIndex, rating))
 
-    // Create or update study item immediately with the rating
     const currentCard = flashcards[currentIndex];
-    const notesToProcess = notes || (note ? [note] : []);
-    const currentNote = notesToProcess.find(n => n.id === currentCard?.noteId);
+    if (!currentCard) return;
 
-    if (currentCard && currentNote) {
-      try {
-        // First create the study item
-        await createStudyItemFromCurrentCard()
+    try {
+      console.log(`🎯 Rating flashcard: "${currentCard.front}" with rating ${rating}`);
 
-        // Reload the note to get the updated study items
-        const updatedNote = await db.notes.get(currentNote.id);
-
-        if (updatedNote) {
-          // Find the study item and rate it to set the review date
-          const block = updatedNote.blocks.find(b =>
-            b.type === 'who' && b.content === currentCard.front
-          );
-
-          if (block && updatedNote.studyStats?.studyItems) {
-            const studyItem = updatedNote.studyStats.studyItems.find(item => item.blockId === block.id);
-
-            if (studyItem) {
-              console.log(`🎯 Rating study item ${studyItem.id} with rating ${rating}`);
-              await SpacedRepetitionService.reviewStudyItem(studyItem.id, rating);
-              console.log(`✅ Study item rated and review date set`);
-            } else {
-              console.warn('Study item not found for rating');
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error rating flashcard:', error);
+      // Fetch the latest note from database to ensure we have fresh data
+      const latestNote = await db.notes.get(currentCard.noteId);
+      if (!latestNote) {
+        console.error(`Note not found: ${currentCard.noteId}`);
+        toast({
+          title: "Error",
+          description: "Note not found in database",
+          variant: "destructive"
+        });
+        return;
       }
+
+      // Find the block that corresponds to this flashcard
+      const block = latestNote.blocks.find(b =>
+        b.type === 'who' && b.content === currentCard.front
+      );
+
+      if (!block) {
+        console.warn('No matching block found for flashcard');
+        toast({
+          title: "Error",
+          description: "No matching block found for this flashcard",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Strategy 1: If studyItems prop is provided (from review session), try to find it there first
+      let studyItemId: string | undefined;
+      if (studyItems && studyItems.length > 0) {
+        const studyItemFromProps = studyItems.find(item =>
+          item.blockId === block.id && item.noteId === latestNote.id
+        );
+        if (studyItemFromProps) {
+          studyItemId = studyItemFromProps.id;
+          console.log(`✅ Found study item from props: ${studyItemId}`);
+        }
+      }
+
+      // Strategy 2: If not found in props, check the latest note from database
+      if (!studyItemId) {
+        const studyItemFromDb = latestNote.studyStats?.studyItems?.find(item => item.blockId === block.id);
+        if (studyItemFromDb) {
+          studyItemId = studyItemFromDb.id;
+          console.log(`✅ Found study item from database: ${studyItemId}`);
+        }
+      }
+
+      // Strategy 3: If still not found, create a new one
+      if (!studyItemId) {
+        console.log('No existing study item found, creating one...');
+        const newStudyItems = await SpacedRepetitionService.createStudyItemsFromBlocks(
+          [block],
+          latestNote,
+          true // forceCreate = true
+        );
+
+        if (newStudyItems.length > 0) {
+          studyItemId = newStudyItems[0].id;
+          console.log(`✅ Created new study item: ${studyItemId}`);
+        } else {
+          console.error('Failed to create study item');
+          toast({
+            title: "Error",
+            description: "Failed to create study item",
+            variant: "destructive"
+          });
+          return;
+        }
+      }
+
+      // Rate the study item (this function fetches fresh data from DB internally)
+      console.log(`🎯 Rating study item ${studyItemId} with rating ${rating}`);
+      const reviewResult = await SpacedRepetitionService.reviewStudyItem(studyItemId, rating);
+      console.log(`✅ Study item rated and review date set:`, {
+        nextReview: reviewResult.nextReview,
+        interval: reviewResult.interval,
+        repetitions: reviewResult.studyItem.repetitions
+      });
+
+      // Show success feedback
+      toast({
+        title: "Rating saved!",
+        description: `Next review: ${reviewResult.nextReview.toLocaleDateString()}`,
+      });
+
+    } catch (error) {
+      console.error('Error rating flashcard:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save rating. Please try again.",
+        variant: "destructive"
+      });
     }
 
     // Move to next card or complete
@@ -500,9 +565,12 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
       setCurrentIndex(currentIndex + 1)
     } else {
       setCompleted(true)
-      if (onComplete && flashcards.length > 0) {
-        onComplete(flashcards[currentIndex].noteId)
-      }
+      // Wait a moment for all database writes to complete before triggering refresh
+      setTimeout(() => {
+        if (onComplete && flashcards.length > 0) {
+          onComplete(flashcards[currentIndex].noteId)
+        }
+      }, 300); // Small delay to ensure DB writes are flushed
     }
   }
 
@@ -517,8 +585,11 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
         // In group mode, we'll just use the ID of the last card's note
         onComplete(flashcards[currentIndex].noteId)
       }
-      // Create study items from completed flashcards
-      createStudyItemsFromFlashcards()
+
+      // REMOVED: No longer calling createStudyItemsFromFlashcards
+      // This function was clearing review data after session completion.
+      // Ratings are saved via handleRating during the session, so no post-completion processing is needed.
+      console.log('✅ Session complete - ratings already saved via handleRating. No additional processing needed.');
     }
   }
 
@@ -552,10 +623,8 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
 
       if (studyItems.length > 0) {
         console.log('Created study items:', studyItems);
-        toast({
-          title: "Success",
-          description: `Created ${studyItems.length} study item(s) for spaced repetition`,
-        });
+        // Don't show success toast for study item creation during review
+        // The rating process will handle user feedback
       } else {
         console.log('No study items created - card type may not be supported');
         toast({
@@ -633,55 +702,16 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
     }
   }
 
+  // REMOVED: createStudyItemsFromFlashcards function completely removed
+  // This function was clearing review data after session completion.
+  // Ratings are saved via handleRating during the session, so no post-completion processing is needed.
+  // Keeping this as a no-op function in case it's still referenced somewhere
   const createStudyItemsFromFlashcards = async () => {
-    try {
-      console.log('Creating study items from completed flashcard session...');
-      const notesToProcess = notes || (note ? [note] : []);
-
-      for (const currentNote of notesToProcess) {
-        console.log(`Processing note: ${currentNote.title}`);
-
-        // Check if study items already exist for this note
-        const existingItems = await SpacedRepetitionService.getStudyItems(currentNote.id);
-        console.log(`Existing study items for note ${currentNote.title}:`, existingItems.length);
-
-        if (existingItems.length === 0) {
-          // Create study items from WHO and WHAT blocks
-          const whoBlocks = currentNote.blocks.filter(b => b.type === 'who');
-          const whatBlocks = currentNote.blocks.filter(b => b.type === 'what');
-
-          console.log(`Found ${whoBlocks.length} WHO blocks and ${whatBlocks.length} WHAT blocks`);
-
-          // Create study items from WHO blocks that have linked WHAT blocks
-          for (const whoBlock of whoBlocks) {
-            if (whoBlock.linkedBlockIds && whoBlock.linkedBlockIds.length > 0) {
-              const linkedWhatBlock = currentNote.blocks.find(b =>
-                b.id === whoBlock.linkedBlockIds![0] && b.type === 'what'
-              );
-
-              if (linkedWhatBlock) {
-                console.log(`Creating study item for WHO block: ${whoBlock.content}`);
-                await SpacedRepetitionService.createStudyItemsFromBlocks([whoBlock], currentNote);
-              }
-            }
-          }
-
-          // Also create study items from standalone WHAT blocks
-          for (const whatBlock of whatBlocks) {
-            if (!whatBlock.linkedBlockIds || whatBlock.linkedBlockIds.length === 0) {
-              console.log(`Creating study item for standalone WHAT block: ${whatBlock.content}`);
-              await SpacedRepetitionService.createStudyItemsFromBlocks([whatBlock], currentNote);
-            }
-          }
-        } else {
-          console.log(`Study items already exist for note ${currentNote.title}`);
-        }
-      }
-
-      console.log('Study items creation completed');
-    } catch (error) {
-      console.error('Error creating study items from flashcards:', error);
-    }
+    // COMPLETELY DISABLED: This function does nothing to prevent data loss
+    // If studyItems prop exists (review session), ratings are already saved
+    // If studyItems prop doesn't exist, study items should be created via other mechanisms
+    console.log('🚫 createStudyItemsFromFlashcards is disabled to prevent data loss');
+    return;
   }
 
   const toggleFlip = () => {
@@ -722,7 +752,7 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
           <p className="mb-6 text-gray-500">You've reviewed all {flashcards.length} flashcards in this session.</p>
 
           {/* Spaced Repetition Integration */}
-          <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+          {/* <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
             <h3 className="text-lg font-semibold mb-2 text-blue-800 dark:text-blue-200">
               Spaced Repetition Active! 🧠
             </h3>
@@ -733,7 +763,7 @@ export default function FlashcardView({ note, notes, folderName, studyItems, onC
             <div className="mt-3 text-xs text-blue-600 dark:text-blue-400">
               Rated cards: {cardRatings.size} / {flashcards.length}
             </div>
-          </div>
+          </div> */}
 
           <div className="flex gap-4 justify-center">
             <Button variant="outline" onClick={restartSession}>

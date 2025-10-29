@@ -89,16 +89,33 @@ export class SpacedRepetitionService {
       // If forceCreate is true (for flashcard ratings), create study items for any WHO block
       if (forceCreate) {
         console.log('🔄 Force creating study items for flashcard rating');
+
+        // Fetch the latest note from database to ensure we have fresh data
+        const latestNote = await db.notes.get(note.id);
+        if (!latestNote) {
+          console.error(`Note not found in database: ${note.id}`);
+          return [];
+        }
+
         const whoBlocks = blocks.filter(b => b.type === 'who');
 
         for (const whoBlock of whoBlocks) {
+          // Check if study item already exists for this block in the latest note
+          const existingStudyItem = latestNote.studyStats?.studyItems?.find(item => item.blockId === whoBlock.id);
+
+          if (existingStudyItem) {
+            console.log(`🔧 Study item already exists for block ${whoBlock.id}, returning existing item`);
+            studyItems.push(existingStudyItem);
+            continue;
+          }
+
           const studyItem: StudyItem = {
             id: `study-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             blockId: whoBlock.id,
-            noteId: note.id,
-            folderId: note.folderId,
+            noteId: latestNote.id,
+            folderId: latestNote.folderId,
             type: "who",
-            nextReview: undefined, // Will be set when rated
+            nextReview: Date.now(), // New items are immediately due for their first review
             suspended: false,
             // Initialize SRS data
             interval: 1,
@@ -117,21 +134,24 @@ export class SpacedRepetitionService {
           studyItems.push(studyItem);
         }
 
-        // Store the study items
-        if (studyItems.length > 0) {
+        // Store only new study items (not existing ones) - merge with existing
+        const existingBlockIds = new Set((latestNote.studyStats?.studyItems || []).map(item => item.blockId));
+        const newStudyItems = studyItems.filter(item => !existingBlockIds.has(item.blockId));
+
+        if (newStudyItems.length > 0) {
           const updatedNote = {
-            ...note,
+            ...latestNote,
             studyStats: {
-              quizAttempts: note.studyStats?.quizAttempts || 0,
-              quizCorrect: note.studyStats?.quizCorrect || 0,
-              flashcardReviews: note.studyStats?.flashcardReviews || 0,
-              studyItems: [...(note.studyStats?.studyItems || []), ...studyItems],
+              quizAttempts: latestNote.studyStats?.quizAttempts || 0,
+              quizCorrect: latestNote.studyStats?.quizCorrect || 0,
+              flashcardReviews: latestNote.studyStats?.flashcardReviews || 0,
+              studyItems: [...(latestNote.studyStats?.studyItems || []), ...newStudyItems],
               lastStudied: Date.now()
             }
           };
 
           await db.notes.put(updatedNote);
-          console.log(`Force added ${studyItems.length} study items to note: ${note.title}`);
+          console.log(`Force added ${newStudyItems.length} new study items to note: ${latestNote.title} (preserved ${latestNote.studyStats?.studyItems?.length || 0} existing items)`);
         }
 
         return studyItems;
@@ -189,7 +209,7 @@ export class SpacedRepetitionService {
             noteId: note.id,
             folderId: note.folderId,
             type: "who", // Always "who" since we only create study items for WHO blocks
-            nextReview: undefined, // No review date until the item is actually studied
+            nextReview: Date.now(), // New items are immediately due for their first review
             suspended: false,
             // Initialize SRS data
             interval: 1,
@@ -216,19 +236,43 @@ export class SpacedRepetitionService {
 
       // Store study data within the note's studyStats (version 7 compatible)
       if (studyItems.length > 0) {
+        // CRITICAL: Always fetch the latest note from database before merging
+        // This prevents stale data from overwriting freshly saved ratings
+        const latestNote = await db.notes.get(note.id);
+        if (!latestNote) {
+          console.error(`Note not found in database: ${note.id}`);
+          return studyItems;
+        }
+
+        // Merge with existing study items from the LATEST note (not the stale one passed in)
+        // This preserves review data that was saved during flashcard sessions
+        const existingStudyItems = latestNote.studyStats?.studyItems || [];
+        const existingBlockIds = new Set(existingStudyItems.map(item => item.blockId));
+
+        // Only add study items that don't already exist (by blockId)
+        const newStudyItems = studyItems.filter(item => !existingBlockIds.has(item.blockId));
+        const mergedStudyItems = [...existingStudyItems, ...newStudyItems];
+
+        console.log(`🔧 Merging study items for note "${latestNote.title}" (using latest DB data):`, {
+          existing: existingStudyItems.length,
+          new: newStudyItems.length,
+          total: mergedStudyItems.length,
+          noteHadRatings: existingStudyItems.some(item => (item.repetitions || 0) > 0 || (item.nextReview && item.nextReview > 0))
+        });
+
         const updatedNote = {
-          ...note,
+          ...latestNote,
           studyStats: {
-            quizAttempts: note.studyStats?.quizAttempts || 0,
-            quizCorrect: note.studyStats?.quizCorrect || 0,
-            flashcardReviews: note.studyStats?.flashcardReviews || 0,
-            studyItems: studyItems,
+            quizAttempts: latestNote.studyStats?.quizAttempts || 0,
+            quizCorrect: latestNote.studyStats?.quizCorrect || 0,
+            flashcardReviews: latestNote.studyStats?.flashcardReviews || 0,
+            studyItems: mergedStudyItems,
             lastStudied: Date.now()
           }
         };
 
         await db.notes.put(updatedNote);
-        console.log(`Added ${studyItems.length} study items to note: ${note.title}`);
+        console.log(`Added ${newStudyItems.length} new study items to note: ${latestNote.title} (preserved ${existingStudyItems.length} existing items with review data)`);
       } else {
         console.log(`No valid study items created for note: ${note.title}`);
       }
@@ -426,8 +470,10 @@ export class SpacedRepetitionService {
       const isCurrentlyLearning = foundStudyItem.isLearning !== false; // Default to learning for new items
       const currentLearningStep = foundStudyItem.learningStep || 0;
 
-      // Learning phase steps (in minutes): 10m, 1 day, 3 days
-      const learningSteps = [10, 1440, 4320]; // 10 minutes, 1 day, 3 days in minutes
+      // Learning phase steps (in minutes): 1 hour (minimum), 1 day, 3 days
+      // CRITICAL: Changed first step from 10 minutes to 60 minutes (1 hour) to prevent
+      // items from having past review dates if the session takes longer than 10 minutes
+      const learningSteps = [60, 1440, 4320]; // 1 hour, 1 day, 3 days in minutes
 
       let newInterval: number = 1; // Default to 1 day
       let newRepetitions = currentRepetitions;
@@ -439,9 +485,9 @@ export class SpacedRepetitionService {
         // Learning phase algorithm
         switch (rating) {
           case Rating.Again:
-            // Reset to first learning step
+            // Reset to first learning step (1 hour minimum to ensure future date)
             newLearningStep = 0;
-            newInterval = learningSteps[0] / (24 * 60); // Convert to days
+            newInterval = learningSteps[0] / (24 * 60); // Convert to days (1 hour = ~0.042 days)
             break;
 
           case Rating.Hard:
@@ -478,7 +524,7 @@ export class SpacedRepetitionService {
             newIsLearning = true;
             newLearningStep = 0;
             newRepetitions = 0;
-            newInterval = learningSteps[0] / (24 * 60); // 10 minutes
+            newInterval = learningSteps[0] / (24 * 60); // 1 hour converted to days (~0.042 days)
             // Reduce ease factor
             newEaseFactor = Math.max(1.3, currentEaseFactor - 0.2);
             break;
@@ -492,23 +538,25 @@ export class SpacedRepetitionService {
 
           case Rating.Good:
             // Standard SM-2 progression
-            if (newRepetitions === 1) {
-              newInterval = 6; // Second review after 6 days
+            newRepetitions = currentRepetitions + 1;
+            // Check repetitions AFTER incrementing to properly handle first review
+            if (newRepetitions === 1 || currentRepetitions === 0) {
+              newInterval = 6; // First/second review after 6 days
             } else {
               newInterval = Math.round(currentInterval * currentEaseFactor);
             }
-            newRepetitions = currentRepetitions + 1;
             break;
 
           case Rating.Easy:
             // Faster progression with ease factor increase
-            if (newRepetitions === 1) {
-              newInterval = 6; // Second review after 6 days
+            newRepetitions = currentRepetitions + 1;
+            newEaseFactor = Math.min(4.0, currentEaseFactor + 0.1); // Increase ease
+            // Check repetitions AFTER incrementing to properly handle first review
+            if (currentRepetitions === 0) {
+              newInterval = 6; // First review after 6 days
             } else {
               newInterval = Math.round(currentInterval * currentEaseFactor * 1.3); // 30% bonus
             }
-            newEaseFactor = Math.min(4.0, currentEaseFactor + 0.1); // Increase ease
-            newRepetitions = currentRepetitions + 1;
             break;
         }
       }
@@ -518,7 +566,23 @@ export class SpacedRepetitionService {
         ? newInterval * 24 * 60 * 60 * 1000 // For sub-day intervals (learning phase)
         : newInterval * 24 * 60 * 60 * 1000; // For day intervals
 
-      const nextReviewTime = Date.now() + intervalInMs;
+      // CRITICAL: Ensure nextReview is always at least 1 hour in the future
+      // This prevents items from having past dates and disappearing from upcoming reviews
+      const minIntervalMs = 60 * 60 * 1000; // 1 hour in milliseconds
+      const calculatedNextReview = Date.now() + intervalInMs;
+      const nextReviewTime = Math.max(calculatedNextReview, Date.now() + minIntervalMs);
+
+      console.log(`🎯 Review update for item ${studyItemId}:`, {
+        rating,
+        currentInterval,
+        newInterval,
+        intervalInMs,
+        currentTime: new Date(Date.now()).toISOString(),
+        nextReviewTime: new Date(nextReviewTime).toISOString(),
+        isLearning: newIsLearning,
+        learningStep: newLearningStep,
+        repetitions: newRepetitions
+      });
 
       // Update the study item with new SRS data
       const updatedStudyItem = {
@@ -669,17 +733,24 @@ export class SpacedRepetitionService {
 
   /**
  * Ensure study items exist for notes with valid WHO block relationships
+ * IMPORTANT: Always fetches latest note from DB to prevent overwriting saved ratings
  */
   static async ensureStudyItemsExist(): Promise<void> {
     try {
       await this.ensureDatabaseReady();
 
       console.log('🔧 Ensuring study items exist for all notes...');
-      const notes = await db.notes.toArray();
+      const noteIds = await db.notes.toCollection().keys();
       let notesUpdated = 0;
 
-      for (const note of notes) {
-        const whoBlocks = note.blocks.filter(b => b.type === 'who');
+      // Fetch notes one by one to ensure we always have the latest version
+      for (const noteId of noteIds) {
+        // CRITICAL: Always fetch the latest note from DB to prevent race conditions
+        // where stale data overwrites freshly saved ratings
+        const latestNote = await db.notes.get(noteId);
+        if (!latestNote) continue;
+
+        const whoBlocks = latestNote.blocks.filter(b => b.type === 'who');
 
         // Only process notes that have WHO blocks with valid relationships
         if (whoBlocks.length > 0) {
@@ -690,13 +761,13 @@ export class SpacedRepetitionService {
             if (whoBlock.linkedBlockIds && whoBlock.linkedBlockIds.length > 0) {
               // Check for WHO -> terminal HOW relationship
               const linkedHowBlocks = whoBlock.linkedBlockIds
-                .map(id => note.blocks.find(b => b.id === id && b.type === 'how'))
+                .map(id => latestNote.blocks.find(b => b.id === id && b.type === 'how'))
                 .filter(Boolean) as Block[];
 
               if (linkedHowBlocks.length === 1) {
                 const howBlock = linkedHowBlocks[0];
                 const howLinksToOtherHow = howBlock.linkedBlockIds?.some(id =>
-                  note.blocks.find(b => b.id === id && b.type === 'how')
+                  latestNote.blocks.find(b => b.id === id && b.type === 'how')
                 );
                 if (!howLinksToOtherHow) {
                   hasValidRelationships = true;
@@ -706,7 +777,7 @@ export class SpacedRepetitionService {
 
               // Check for WHO -> WHAT relationship
               const linkedWhatBlocks = whoBlock.linkedBlockIds
-                .map(id => note.blocks.find(b => b.id === id && b.type === 'what'))
+                .map(id => latestNote.blocks.find(b => b.id === id && b.type === 'what'))
                 .filter(Boolean) as Block[];
 
               if (linkedWhatBlocks.length > 0) {
@@ -717,16 +788,19 @@ export class SpacedRepetitionService {
           }
 
           if (hasValidRelationships) {
-            // Check if note already has study items
-            if (!note.studyStats?.studyItems || note.studyStats.studyItems.length === 0) {
-              console.log(`🔧 Creating study items for note: ${note.title}`);
-              await this.createStudyItemsFromBlocks(note.blocks, note);
+            // CRITICAL: Check the LATEST note from DB (not stale data)
+            // Only create if there are truly no study items in the latest DB state
+            const existingStudyItems = latestNote.studyStats?.studyItems || [];
+            if (existingStudyItems.length === 0) {
+              console.log(`🔧 Creating study items for note: ${latestNote.title}`);
+              // createStudyItemsFromBlocks will also fetch latest note internally, but pass latestNote anyway
+              await this.createStudyItemsFromBlocks(latestNote.blocks, latestNote);
               notesUpdated++;
             } else {
-              console.log(`🔧 Note ${note.title} already has ${note.studyStats.studyItems.length} study items`);
+              console.log(`🔧 Note ${latestNote.title} already has ${existingStudyItems.length} study items (preserving review data)`);
             }
           } else {
-            console.log(`🔧 Note ${note.title} has WHO blocks but no valid relationships for study items`);
+            console.log(`🔧 Note ${latestNote.title} has WHO blocks but no valid relationships for study items`);
           }
         }
       }
@@ -1267,4 +1341,73 @@ if (typeof window !== 'undefined') {
   (window as any).debugStudyItemDates = () => SpacedRepetitionService.debugStudyItemDates();
   (window as any).clearAllReviewDates = () => SpacedRepetitionService.clearAllReviewDates();
   (window as any).simulateIntervals = () => SpacedRepetitionService.simulateSpacedRepetitionIntervals();
+  (window as any).debugDueItems = async (folderId?: string) => {
+    const now = Date.now();
+    const dueItems = await SpacedRepetitionService.getDueStudyItems(folderId);
+
+    console.log('=== DUE ITEMS DEBUG ===');
+    console.log(`Current time: ${new Date(now).toISOString()}`);
+    console.log(`Total due items: ${dueItems.length}`);
+
+    dueItems.forEach((item, index) => {
+      console.log(`\n--- Due Item ${index + 1} ---`);
+      console.log(`ID: ${item.id}`);
+      console.log(`Type: ${item.type}`);
+      console.log(`Note: ${item.note?.title || 'Unknown'}`);
+      console.log(`Block Content: ${item.block?.content?.substring(0, 50) || 'No content'}`);
+      console.log(`Next Review: ${item.nextReview ? new Date(item.nextReview).toISOString() : 'null'}`);
+      console.log(`Is Due: ${item.nextReview ? (item.nextReview <= now) : false}`);
+      console.log(`Suspended: ${item.suspended}`);
+      console.log(`Is Learning: ${item.isLearning}`);
+      console.log(`Learning Step: ${item.learningStep}`);
+      console.log(`Repetitions: ${item.repetitions}`);
+      console.log(`Interval: ${item.interval} days`);
+    });
+
+    console.log('=== END DUE ITEMS DEBUG ===');
+    return dueItems;
+  };
+  (window as any).debugAllStudyItems = async (folderId?: string) => {
+    const now = Date.now();
+    const allItems = await SpacedRepetitionService.getStudyItems(undefined, folderId);
+
+    console.log('=== ALL STUDY ITEMS DEBUG ===');
+    console.log(`Current time: ${new Date(now).toISOString()}`);
+    console.log(`Total study items: ${allItems.length}`);
+
+    let dueCount = 0;
+    let futureCount = 0;
+    let nullCount = 0;
+
+    allItems.forEach((item, index) => {
+      const isDue = item.nextReview && item.nextReview <= now && !item.suspended;
+      const isFuture = item.nextReview && item.nextReview > now;
+      const isNull = !item.nextReview;
+
+      if (isDue) dueCount++;
+      if (isFuture) futureCount++;
+      if (isNull) nullCount++;
+
+      console.log(`\n--- Study Item ${index + 1} ---`);
+      console.log(`ID: ${item.id}`);
+      console.log(`Type: ${item.type}`);
+      console.log(`Note: ${item.note?.title || 'Unknown'}`);
+      console.log(`Block Content: ${item.block?.content?.substring(0, 50) || 'No content'}`);
+      console.log(`Next Review: ${item.nextReview ? new Date(item.nextReview).toISOString() : 'null'}`);
+      console.log(`Status: ${isDue ? 'DUE' : isFuture ? 'FUTURE' : isNull ? 'NO DATE' : 'OTHER'}`);
+      console.log(`Suspended: ${item.suspended}`);
+      console.log(`Is Learning: ${item.isLearning}`);
+      console.log(`Learning Step: ${item.learningStep}`);
+      console.log(`Repetitions: ${item.repetitions}`);
+      console.log(`Interval: ${item.interval} days`);
+    });
+
+    console.log(`\n=== SUMMARY ===`);
+    console.log(`Due items: ${dueCount}`);
+    console.log(`Future items: ${futureCount}`);
+    console.log(`Items with no review date: ${nullCount}`);
+    console.log('=== END ALL STUDY ITEMS DEBUG ===');
+
+    return { dueCount, futureCount, nullCount, total: allItems.length };
+  };
 }

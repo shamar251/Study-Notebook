@@ -50,9 +50,10 @@ interface ReviewPageProps {
   folderId?: string
   onStartReview?: (studyItems: StudyItemWithBlock[], folderName: string) => void
   onSelectMode?: (mode: "flashcards" | "quiz" | "test" | "review", note?: Note, subfolderId?: string) => void
+  refreshTrigger?: number // Add a refresh trigger prop
 }
 
-export default function ReviewPage({ folderId, onStartReview, onSelectMode }: ReviewPageProps) {
+export default function ReviewPage({ folderId, onStartReview, onSelectMode, refreshTrigger }: ReviewPageProps) {
   console.log('🔄 ReviewPage component MOUNTING with props:', { folderId });
 
   const [folders, setFolders] = useState<Folder[]>([])
@@ -74,6 +75,20 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
       setSelectedFolderId(folderId);
     }
   }, [folderId]);
+
+  // Refresh data when refreshTrigger changes
+  useEffect(() => {
+    if (refreshTrigger && refreshTrigger > 0) {
+      console.log('🔄 Refresh trigger detected, refreshing data...');
+      // Add a delay to ensure all database updates from the flashcard session are complete
+      // Multiple ratings may have been saved, so we need extra time for all writes to finish
+      setTimeout(async () => {
+        console.log('🔄 Executing refresh after flashcard session...');
+        await refreshData();
+        console.log('🔄 Refresh complete, data should be up to date');
+      }, 800); // Increased delay to ensure all DB writes are flushed
+    }
+  }, [refreshTrigger]);
 
   // Helper functions for review history
   const getUpcomingReviewsCount = (): number => {
@@ -157,7 +172,10 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
   };
 
   const renderUpcomingReviews = () => {
+    console.log('🔍 renderUpcomingReviews called with studyItems:', studyItems.length);
+
     if (!studyItems.length) {
+      console.log('🔍 No study items, showing empty state');
       return (
         <div className="text-center py-12 text-muted-foreground">
           <Calendar className="w-16 h-16 mx-auto mb-4 opacity-40" />
@@ -168,6 +186,8 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
     }
 
     const now = Date.now();
+    console.log('🔍 Current time:', new Date(now).toISOString());
+
     const upcomingItems = studyItems
       .filter(item => {
         // Only show items that have valid future review dates
@@ -175,12 +195,30 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
         const isFuture = hasValidDate && item.nextReview! > now;
         const isNotSuspended = !item.suspended;
 
+        console.log(`🔍 Item ${item.id}:`, {
+          nextReview: item.nextReview ? new Date(item.nextReview).toISOString() : 'null',
+          hasValidDate,
+          isFuture,
+          isNotSuspended,
+          suspended: item.suspended,
+          blockContent: item.block?.content?.substring(0, 30)
+        });
+
         return isNotSuspended && hasValidDate && isFuture;
       })
-      .sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0))
-      .slice(0, 10); // Show next 10 items
+      .sort((a, b) => (a.nextReview || 0) - (b.nextReview || 0));
+    // Removed slice limit to show all upcoming items, not just 10
+
+    console.log('🔍 Filtered upcoming items:', upcomingItems.length);
+    console.log('🔍 Upcoming items details:', upcomingItems.map(item => ({
+      id: item.id,
+      nextReview: item.nextReview ? new Date(item.nextReview).toISOString() : 'null',
+      blockContent: item.block?.content?.substring(0, 30),
+      noteTitle: item.note?.title
+    })));
 
     if (upcomingItems.length === 0) {
+      console.log('🔍 No upcoming items found, showing "All caught up" message');
       return (
         <div className="text-center py-12 text-muted-foreground">
           <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-500" />
@@ -396,7 +434,17 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
 
   const refreshData = async () => {
     console.log('🔄 Manual refresh triggered');
-    await loadStudyItems()
+    try {
+      setIsLoading(true);
+      await loadFolders();
+      await loadNotes();
+      await loadStudyItems();
+      console.log('🔄 Refresh completed successfully');
+    } catch (error) {
+      console.error('❌ Error during refresh:', error);
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   const forceRefresh = () => {
@@ -963,14 +1011,14 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
               Clear All Review Dates
             </Button> */}
 
-            {/* <Button
+            <Button
               variant="outline"
               onClick={refreshData}
               className="flex items-center gap-2"
             >
               <RefreshCw className="w-4 h-4" />
               Refresh
-            </Button> */}
+            </Button>
 
             {/* <Button
               variant="outline"
@@ -1016,7 +1064,21 @@ export default function ReviewPage({ folderId, onStartReview, onSelectMode }: Re
                 ))}
               </ul>
             </div>
+            <div>
+              <p>Current time: {new Date().toISOString()}</p>
+              <p>Refresh trigger: {refreshTrigger}</p>
+              <p>Is loading: {isLoading ? 'Yes' : 'No'}</p>
+            </div>
             <div className="flex gap-2 mt-3">
+              <button
+                onClick={async () => {
+                  console.log('🔄 Manual refresh button clicked');
+                  await refreshData();
+                }}
+                className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+              >
+                🔄 Force Refresh
+              </button>
               <button
                 onClick={async () => {
                   const simulation = (window as any).simulateIntervals();

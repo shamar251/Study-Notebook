@@ -61,6 +61,7 @@ export default function NoteApp() {
   const [isElectron, setIsElectron] = useState(false);
   const [currentFilePath, setCurrentFilePath] = useState<string | null>(null);
   const [targetBlockId, setTargetBlockId] = useState<string | null>(null);
+  const [reviewRefreshTrigger, setReviewRefreshTrigger] = useState(0);
 
   useEffect(() => {
     // Initialize database with default data if empty
@@ -1044,9 +1045,11 @@ export default function NoteApp() {
                 <TabsContent value="flashcards" className="flex-1 p-0 m-0 h-full overflow-hidden">
                   <FlashcardView
                     note={activeNote}
-                    onComplete={() =>
-                      updateStudyStats(activeNote.id, "flashcards")
-                    }
+                    onComplete={() => {
+                      updateStudyStats(activeNote.id, "flashcards");
+                      // Trigger review page refresh
+                      setReviewRefreshTrigger(prev => prev + 1);
+                    }}
                   />
                 </TabsContent>
 
@@ -1109,7 +1112,7 @@ export default function NoteApp() {
 
 
                 <TabsContent value="review" className="flex-1 p-0 m-0 h-full overflow-hidden">
-                  <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} />
+                  <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} refreshTrigger={reviewRefreshTrigger} />
                 </TabsContent>
 
                 <TabsContent value="view" className="flex-1 p-0 m-0 h-full overflow-hidden">
@@ -1207,6 +1210,9 @@ export default function NoteApp() {
                         // Handle completion for folder-level flashcards
                         console.log("Folder flashcards completed");
 
+                        // Trigger review page refresh
+                        setReviewRefreshTrigger(prev => prev + 1);
+
                         // Handle navigation based on study context
                         if (currentStudySession?.context === 'review') {
                           setView('review');
@@ -1257,7 +1263,7 @@ export default function NoteApp() {
                 )}
 
                 {view === "review" && (
-                  <ReviewPage folderId={activeFolder || undefined} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
+                  <ReviewPage folderId={activeFolder || undefined} onStartReview={handleStartReview} onSelectMode={selectStudyMode} refreshTrigger={reviewRefreshTrigger} />
                 )}
               </div>
             )}
@@ -1309,12 +1315,12 @@ export default function NoteApp() {
 
 
           {view === 'review' && activeNote && (
-            <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
+            <ReviewPage folderId={activeNote.folderId} onStartReview={handleStartReview} onSelectMode={selectStudyMode} refreshTrigger={reviewRefreshTrigger} />
           )}
 
           {/* Show ReviewPage when view is 'review' regardless of other state */}
           {view === 'review' && !activeNote && (
-            <ReviewPage folderId={activeFolder || undefined} onStartReview={handleStartReview} onSelectMode={selectStudyMode} />
+            <ReviewPage folderId={activeFolder || undefined} onStartReview={handleStartReview} onSelectMode={selectStudyMode} refreshTrigger={reviewRefreshTrigger} />
           )}
         </main>
       </div>
