@@ -31,3 +31,10 @@ next-env.d.ts
 *.exe
 *.asar
 *.asar.unpacked
+# Local data and generated output (personal notes, vectors, logs, test output)
+data/vectors/
+logs/
+test-results/
+playwright-report/
+.python_deps_installed
+qdrant-chunk-report.json

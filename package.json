@@ -7,15 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test": "jest",
     "test:spaced-repetition": "node scripts/test-spaced-repetition.js",
     "build:electron": "tsc -p electron/tsconfig.json && npm run postbuild",
-    "electron:dev": "npm run build:electron && cross-env QDRANT_URL=https://39d385fd-d382-4626-88ff-3e30f74825bc.us-east4-0.gcp.cloud.qdrant.io:6333 QDRANT_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.koHi2gFKW1KyzGSdB4JI3NplNK1em0iEKDfKdhMjsk NODE_ENV=development electron electron/dist/main.js",
+    "electron:dev": "npm run build:electron && cross-env NODE_ENV=development electron electron/dist/main.js",
     "electron:build": "next build && npm run build:electron && cross-env NODE_ENV=production electron electron/dist/main.js",
     "package": "next build && npm run build:electron && electron-builder",
     "electron": "npm run electron:dev",
     "build:react": "next build",
     "dist": "electron-builder",
-    "postbuild": "xcopy lib electron\\dist\\lib /E /I /Y"
+    "postbuild": "node -e \"require('fs').cpSync('lib','electron/dist/lib',{recursive:true})\""
   },
   "dependencies": {
     "@antv/layout": "^1.2.14-beta.8",
