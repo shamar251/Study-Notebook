@@ -1,4 +1,4 @@
-// OpenAI and Qdrant embedding/search utility (scaffold)
+// Embedding (Ollama or OpenAI) and local vector search utility
 import * as axios from 'axios'; // Make sure to install axios: npm install axios @types/axios
 import { upsertLocalVector, searchLocalVectors } from './localVectorStore';
 
@@ -6,9 +6,6 @@ import { upsertLocalVector, searchLocalVectors } from './localVectorStore';
 const EMBEDDING_PROVIDER = process.env.EMBEDDING_PROVIDER || 'ollama'; // 'ollama' or 'openai'
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
-// Deprecated: Qdrant config (kept for backward compatibility but unused now)
-const QDRANT_URL = "";
-const QDRANT_API_KEY = "";
 
 // Validate OpenAI env only if using OpenAI
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
